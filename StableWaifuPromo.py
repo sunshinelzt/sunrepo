@@ -1,4 +1,4 @@
-# meta developer: @yourusername
+# meta developer: @sunshinelzt
 from telethon import events
 from hikkatl.types import Message
 from .. import loader, utils
