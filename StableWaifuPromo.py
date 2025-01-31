@@ -19,17 +19,17 @@ class StableWaifuPromo(loader.Module):
             self.client.add_event_handler(self.check_new_messages, events.NewMessage(chats=self.channel))
 
     async def wcmd(self, message: Message):
-        """Включает / Выключает автоактивацию"""
+        """on Включит / off Выключает автоактивацию промокодов"""
         args = utils.get_args_raw(message)
 
         if args == "on":
             self.db.set("StableWaifuPromo", "enabled", True)
             self.client.add_event_handler(self.check_new_messages, events.NewMessage(chats=self.channel))
-            return await utils.answer(message, "**✅ Автоактивация ВКЛЮЧЕНА!**")
+            return await utils.answer(message, "✅ Автоактивация промокодов ВКЛЮЧЕНА!")
         elif args == "off":
             self.db.set("StableWaifuPromo", "enabled", False)
             self.client.remove_event_handler(self.check_new_messages)
-            return await utils.answer(message, "**⛔ Автоактивация ВЫКЛЮЧЕНА.**")
+            return await utils.answer(message, "⛔ Автоактивация промокодов ВЫКЛЮЧЕНА.")
 
         status = "**🟢 ВКЛЮЧЕНА**" if self.db.get("StableWaifuPromo", "enabled", False) else "**🔴 ВЫКЛЮЧЕНА**"
         await utils.answer(message, f"**📡 Статус автоактивации: {status}**")
