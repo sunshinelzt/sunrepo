@@ -31,8 +31,8 @@ class StableWaifuPromo(loader.Module):
             self.client.remove_event_handler(self.check_new_messages)
             return await utils.answer(message, "⛔ Автоактивация промокодов ВЫКЛЮЧЕНА.")
 
-        status = "**🟢 ВКЛЮЧЕНА**" if self.db.get("StableWaifuPromo", "enabled", False) else "**🔴 ВЫКЛЮЧЕНА**"
-        await utils.answer(message, f"**📡 Статус автоактивации: {status}**")
+        status = "🟢 ВКЛЮЧЕНА" if self.db.get("StableWaifuPromo", "enabled", False) else "**🔴 ВЫКЛЮЧЕНА**"
+        await utils.answer(message, f"📡 Статус автоактивации: {status}")
 
     async def check_new_messages(self, event: Message):
         """Отслеживает новые промокоды и активирует их"""
