@@ -19,7 +19,7 @@ class StableWaifuPromo(loader.Module):
             self.client.add_event_handler(self.check_new_messages, events.NewMessage(chats=self.channel))
 
     async def wcmd(self, message: Message):
-        """on Включит / off Выключает автоактивацию промокодов"""
+        """on Включает / off Выключает автоактивацию промокодов"""
         args = utils.get_args_raw(message)
 
         if args == "on":
