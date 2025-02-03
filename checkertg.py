@@ -1,4 +1,4 @@
-#   Codes by sunshinelzt   #
+#   Coded by sunshinelzt   #
 #     t.me/sunshinelzt     #
 # This code under AGPL-3.0 #
 
