@@ -22,7 +22,6 @@ class CheckerTGMod(loader.Module):
         "no_user": "⚠️ <b>[CheckerAPI]</b> Укажите ID, username или ответьте на сообщение.",
         "error": "🚨 <b>[CheckerAPI]</b> Ошибка запроса: <code>{}</code>",
         "user_not_found": "❌ <b>[CheckerAPI]</b> Пользователь <code>{}</code> не найден.",
-        "phone_not_found": "📞 <b>Номер телефона не найден</b> 😞"
     }
 
     async def get_user_id(self, username, client):
@@ -69,7 +68,7 @@ class CheckerTGMod(loader.Module):
             # Если "Not found", заменяем на "Не найдено"
             phone_number = data.get("data", "").split(" | ")[0].replace("Phone: ", "")
             if "Not found" in phone_number:
-                phone_number = "Не найдено"
+                phone_number = "Не найдено!"
 
             # Формируем ответ с результатами проверки, включая только номер телефона
             result_message = self.strings["response"].format(
