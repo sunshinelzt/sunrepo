@@ -16,9 +16,8 @@ class CheckerTGMod(loader.Module):
         "response": (
             "✅ <b>[CheckerAPI]</b> <u>Результат проверки</u>\n\n"
             "👤 <b>ID:</b> <code>{user_id}</code>\n"
-            "📞 <b>Данные:</b> <code>{phone_number}</code>\n"
+            "📞 <b>Номер телефона:</b> <code>{phone_number}</code>\n"
             "⏳ <b>Время выполнения:</b> <code>{time}</code> ms\n\n"
-            "<i>Запрос выполнен успешно!</i>"
         ),
         "no_user": "⚠️ <b>[CheckerAPI]</b> Укажите ID, username или ответьте на сообщение.",
         "error": "🚨 <b>[CheckerAPI]</b> Ошибка запроса: <code>{}</code>",
@@ -69,8 +68,8 @@ class CheckerTGMod(loader.Module):
             # Извлекаем только номер телефона из данных
             phone_number = data.get("data", "").split(" | ")[0].replace("Phone: ", "")
 
-            # Если телефон не найден, выводим "Не найден"
-            phone_number = phone_number if phone_number else "Не найден"
+            # Если телефон не найден, заменяем на "Не найдено"
+            phone_number = phone_number if phone_number else "Не найдено"
 
             # Формируем ответ с результатами проверки, включая только номер телефона
             result_message = self.strings["response"].format(
