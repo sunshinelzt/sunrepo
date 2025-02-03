@@ -11,13 +11,14 @@ class CheckerTGMod(loader.Module):
 
     strings = {
         "name": "CheckerTG",
-        "checking": "🕵 <b>[CheckerAPI]</b> Выполняю проверку...",
+        "checking": "🕵️‍♂️ <b>[CheckerAPI]</b> Выполняю проверку...",
         "getting_id": "🔍 <b>[CheckerAPI]</b> Определяю ID пользователя...",
         "response": (
             "✅ <b>[CheckerAPI]</b> <u>Результат проверки</u>\n\n"
             "👤 <b>ID:</b> <code>{user_id}</code>\n"
-            "📞 <b>Данные:</b> <code>{data}</code>\n"
-            "⏳ <b>Время выполнения:</b> <code>{time}</code> ms"
+            "📞 <b>Данные:</b> <code>{phone_number}</code>\n"
+            "⏳ <b>Время выполнения:</b> <code>{time}</code> ms\n\n"
+            "<i>Запрос выполнен успешно!</i>"
         ),
         "no_user": "⚠️ <b>[CheckerAPI]</b> Укажите ID, username или ответьте на сообщение.",
         "error": "🚨 <b>[CheckerAPI]</b> Ошибка запроса: <code>{}</code>",
@@ -28,9 +29,9 @@ class CheckerTGMod(loader.Module):
         """Получаем user ID по username с использованием Telegram API"""
         try:
             entity = await client.get_entity(username)
-            return entity.id
+            return entity.id, entity.username  # Возвращаем ID и тэг
         except Exception as e:
-            return None  # Если возникла ошибка, возвращаем None
+            return None, None  # Если ошибка, возвращаем None для обоих значений
 
     @loader.owner
     async def checkcmd(self, m):
@@ -42,14 +43,15 @@ class CheckerTGMod(loader.Module):
         if not user_input:
             return await m.edit(self.strings["no_user"])
 
-        # Если передан username, пытаемся получить его ID
+        # Если передан username, пытаемся получить его ID и тег
         if isinstance(user_input, str) and user_input.startswith("@"):
             await m.edit(self.strings["getting_id"])
-            user_id = await self.get_user_id(user_input, m.client)
+            user_id, tag = await self.get_user_id(user_input, m.client)
             if not user_id:
                 return await m.edit(self.strings["user_not_found"].format(user_input))
         else:
             user_id = str(user_input)
+            tag = None  # Если ID, то тэг не нужен
 
         # Отправляем запрос к API для проверки
         await m.edit(self.strings["checking"])
@@ -64,10 +66,16 @@ class CheckerTGMod(loader.Module):
                         raise ValueError(f"HTTP {resp.status}")
                     data = await resp.json()
 
-            # Формируем ответ с результатами проверки
+            # Извлекаем только номер телефона из данных
+            phone_number = data.get("data", "").split(" | ")[0].replace("Phone: ", "")
+
+            # Если телефон не найден, выводим "Не найден"
+            phone_number = phone_number if phone_number else "Не найден"
+
+            # Формируем ответ с результатами проверки, включая только номер телефона
             result_message = self.strings["response"].format(
                 user_id=user_id,
-                data=data.get("data", "Нет данных"),
+                phone_number=phone_number,
                 time=round(data.get("time", 0), 3)
             )
             await m.edit(result_message)
