@@ -16,7 +16,6 @@ class CheckerTGMod(loader.Module):
         "response": (
             "✅ <b>[CheckerAPI]</b> <u>Результат проверки</u>\n\n"
             "👤 <b>ID:</b> <code>{user_id}</code>\n"
-            "📊 <b>Статус:</b> <code>{status}</code>\n"
             "📞 <b>Данные:</b> <code>{data}</code>\n"
             "⏳ <b>Время выполнения:</b> <code>{time}</code> ms"
         ),
@@ -68,7 +67,6 @@ class CheckerTGMod(loader.Module):
             # Формируем ответ с результатами проверки
             result_message = self.strings["response"].format(
                 user_id=user_id,
-                status=data.get("status", "Неизвестно"),
                 data=data.get("data", "Нет данных"),
                 time=round(data.get("time", 0), 3)
             )
