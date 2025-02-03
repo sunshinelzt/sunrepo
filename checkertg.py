@@ -18,7 +18,6 @@ class CheckerTGMod(loader.Module):
             "👤 <b>ID:</b> <code>{user_id}</code>\n"
             "📞 <b>Номер телефона:</b> <code>{phone_number}</code>\n"
             "⏳ <b>Время выполнения:</b> <code>{time}</code> ms\n\n"
-            "<i>Запрос выполнен успешно!</i>"
         ),
         "no_user": "⚠️ <b>[CheckerAPI]</b> Укажите ID, username или ответьте на сообщение.",
         "error": "🚨 <b>[CheckerAPI]</b> Ошибка запроса: <code>{}</code>",
