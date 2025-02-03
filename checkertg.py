@@ -67,9 +67,9 @@ class CheckerTGMod(loader.Module):
 
             # Извлекаем только номер телефона из данных
             phone_number = data.get("data", "").split(" | ")[0].replace("Phone: ", "")
+            if "Not found!" in phone_number:
+                phone_number = "Не найдено"
 
-            # Если телефон не найден, заменяем на "Не найдено"
-            phone_number = phone_number if phone_number else "Не найдено"
 
             # Формируем ответ с результатами проверки, включая только номер телефона
             result_message = self.strings["response"].format(
