@@ -56,7 +56,7 @@ class CheckerTGMod(loader.Module):
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url) as
+                async with session.get(url) as resp:
                     if resp.status != 200:
                         raise ValueError(f"HTTP {resp.status}")
                     data = await resp.json()
@@ -64,7 +64,6 @@ class CheckerTGMod(loader.Module):
             phone_number = data.get("data", "").split(" | ")[0].replace("Phone: ", "")
             if "Not found!" in phone_number:
                 phone_number = "Не найдено"
-
 
             result_message = self.strings["response"].format(
                 user_id=user_id,
