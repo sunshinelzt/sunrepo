@@ -70,12 +70,11 @@ class CheckerTGMod(loader.Module):
 
             # Если "Not found", заменяем на "Не найдено"
             phone_number = data.get("data", "").split(" | ")[0].replace("Phone: ", "")
-if "Not found" in phone_number:
-    phone_number = "Не найден!"
+            if "Not found" in phone_number:
+              phone_number = "Не найден!"
+            if "UID must be int!" in phone_number:
+              phone_number = "UID должен быть целым числом!"
 
-uid_error = "UID must be int!"
-if uid_error in phone_number:
-    phone_number = phone_number.replace(uid_error, "UID должен быть целым числом!")
 
             # Формируем ответ с результатами проверки, включая только номер телефона
             result_message = self.strings["response"].format(
