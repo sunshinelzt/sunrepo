@@ -4,7 +4,7 @@
 
 # meta developer @sunshinelzt
 
-__version__ = (7,7,7)
+__version__ = (1,4,8,8)
 from .. import loader, utils
 import aiohttp
 
