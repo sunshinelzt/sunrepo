@@ -2,6 +2,9 @@
 #     t.me/sunshinelzt     #
 # This code under AGPL-3.0 #
 
+# meta developer @sunshinelzt
+
+__version__ = (7,7,7)
 from .. import loader, utils
 import aiohttp
 
