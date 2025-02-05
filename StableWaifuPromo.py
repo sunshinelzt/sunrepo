@@ -41,7 +41,7 @@ class StableWaifuPromoMod(loader.Module):
             self.processed.add(promo_code)  # Добавляем в список обработанных
             await asyncio.sleep(self.delay)  # Защита от спама
 
-    async def wpromo_cmd(self, message: Message):
+    async def wpromocmd(self, message: Message):
         """Включить / отключить автоактивацию промокодов"""
         self.active = not self.active
         self.db.set("StableWaifuPromo", "active", self.active)
