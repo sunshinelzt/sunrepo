@@ -1,43 +1,48 @@
 # meta developer: @sunshinelzt
+# meta name: StableWaifuPromo
+# meta desc: Автоматически активирует промокоды в группе @StableWaifu
+# meta author: @sunshinelzt
 
-from telethon import events
+import re
+import asyncio
+from hikka import loader
 from hikkatl.types import Message
-from .. import loader, utils
 
-class StableWaifuPromo(loader.Module):
-    """Автоматическая активация промокодов из @StableWaifu"""
+class StableWaifuPromoMod(loader.Module):
+    """Автоматически активирует промокоды в группе @StableWaifu"""
 
     strings = {"name": "StableWaifuPromo"}
+    waifu_bot = "@StableWaifuBot"
+    waifu_chat = -1001771182827  # ID группы @StableWaifu
+    delay = 1.5  # Задержка для защиты от спама
 
     async def client_ready(self, client, db):
-        """Инициализация"""
         self.client = client
         self.db = db
-        self.channel = "@StableWaifu"
+        self.active = self.db.get("StableWaifuPromo", "active", True)
+        self.processed = set()  # Храним обработанные промокоды в сессии
 
-        if self.db.get("StableWaifuPromo", "enabled", False):
-            self.client.add_event_handler(self.check_new_messages, events.NewMessage(chats=self.channel))
+    async def watcher(self, message: Message):
+        """Мониторинг сообщений в группе @StableWaifu"""
+        if not self.active or message.chat_id != self.waifu_chat or not message.raw_text:
+            return
 
-    async def wcmd(self, message: Message):
-        """on Включает / off Выключает автоактивацию промокодов"""
-        args = utils.get_args_raw(message)
+        promo_codes = set(re.findall(r"https://t\.me/StableWaifuBot\?start=promo_([\w\d]+)", message.raw_text))
+        promo_codes.update(
+            entity_text.split("promo_")[-1]
+            for _, entity_text in message.get_entities_text()
+            if "t.me/StableWaifuBot?start=promo_" in entity_text
+        )
 
-        if args == "on":
-            self.db.set("StableWaifuPromo", "enabled", True)
-            self.client.add_event_handler(self.check_new_messages, events.NewMessage(chats=self.channel))
-            return await utils.answer(message, "✅ Автоактивация промокодов ВКЛЮЧЕНА!")
-        elif args == "off":
-            self.db.set("StableWaifuPromo", "enabled", False)
-            self.client.remove_event_handler(self.check_new_messages)
-            return await utils.answer(message, "⛔ Автоактивация промокодов ВЫКЛЮЧЕНА.")
+        new_codes = promo_codes - self.processed  # Убираем уже активированные в этой сессии
 
-        status = "🟢 ВКЛЮЧЕНА" if self.db.get("StableWaifuPromo", "enabled", False) else "**🔴 ВЫКЛЮЧЕНА**"
-        await utils.answer(message, f"📡 Статус автоактивации: {status}")
+        for promo_code in new_codes:
+            await self.client.send_message(self.waifu_bot, f"/start promo_{promo_code}")
+            self.processed.add(promo_code)  # Добавляем в список обработанных
+            await asyncio.sleep(self.delay)  # Защита от спама
 
-    async def check_new_messages(self, event: Message):
-        """Отслеживает новые промокоды и активирует их"""
-        promo_links = [e.url for e in event.message.entities or [] if hasattr(e, "url") and "start=promo_" in e.url]
-
-        for link in promo_links:
-            promo_code = link.split("start=")[1]
-            await self.client.send_message("StableWaifuBot", f"/start {promo_code}")
+    async def wpromo_cmd(self, message: Message):
+        """Включить / отключить автоактивацию промокодов"""
+        self.active = not self.active
+        self.db.set("StableWaifuPromo", "active", self.active)
+        await message.edit(f"✅ Автоактивация: {'ВКЛЮЧЕНА' if self.active else 'ВЫКЛЮЧЕНА'}")
