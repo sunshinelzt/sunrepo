@@ -13,7 +13,7 @@ class StableWaifuPromoMod(loader.Module):
 
     strings = {"name": "StableWaifuPromo"}
     waifu_bot = "@StableWaifuBot"
-    waifu_chat = -1001771182827  # ID группы @StableWaifu
+    waifu_chat = -1001819055565  # ID группы @StableWaifu
     delay = 1.5  # Задержка для защиты от спама
 
     async def client_ready(self, client, db):
