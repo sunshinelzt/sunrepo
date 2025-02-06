@@ -4,93 +4,132 @@
 
 import logging
 import re
+from telethon.errors import AlreadyInConversationError
 from telethon.tl.types import Message
 from .. import loader, utils
 
-logger = logging.getLogger("PromoClaimer")
+logger = logging.getLogger('PromoClaimer')
 
 @loader.tds
 class PromoClaimerMod(loader.Module):
-    """Автоматически активирует промокоды для @StableWaifuBot"""
-
+    """Automatically claim https://t.me/StableWaifuBot promo from any chat"""
     strings = {
         "name": "PromoClaimer",
-        "promo_claimed": "✅ Активирован промокод <b>{promo}</b> (+{amount} токенов)",
-        "promo_invalid": "❌ Промокод <b>{promo}</b> недействителен",
-        "promo_already": "⚠️ Промокод <b>{promo}</b> уже активирован",
-        "toggle_on": "✅ Автоактивация промокодов <b>включена</b>",
-        "toggle_off": "❌ Автоактивация промокодов <b>выключена</b>",
-        "chat_on": "✅ Отслеживание промокодов в этом чате <b>включено</b>",
-        "chat_off": "❌ Отслеживание промокодов в этом чате <b>выключено</b>",
-        "balance": "💰 Ваш баланс: <b>{tokens}</b> токенов",
+        "claimed_promo": "[PromoClaimer] 👌 Я успешно активировал промокод {promo} на {amount} токен(-ов)!",
+        "error_watcher": "[PromoClaimer] ⛔️ Во время отслеживания сообщений произошла ошибка:\n{e}",
+        "invalid_promo": "[PromoClaimer] 😢 Промокод {promo} недействителен, либо уже истек!",
+        "already_claimed": "[PromoClaimer] 😢 Промокод {promo} уже активирован!",
+        "config_changed": "[PromoClaimer] ✅ Настройки изменены: {key} = {value}",
+        "logging_disabled": "[PromoClaimer] 🛑 Логирование отключено.",
+        "logging_enabled": "[PromoClaimer] ✅ Логирование включено.",
+        "_cls_doc": "Автоматически забирать промокоды для https://t.me/StableWaifuBot",
+    }
+
+    strings_ru = {
+        "claimed_promo": "[PromoClaimer] 👌 Я успешно активировал промокод {promo} на {amount} токен(-ов)!",
+        "error_watcher": "[PromoClaimer] ⛔️ Во время отслеживания сообщений произошла ошибка:\n{e}",
+        "invalid_promo": "[PromoClaimer] 😢 Промокод {promo} недействителен, либо уже истек!",
+        "already_claimed": "[PromoClaimer] 😢 Промокод {promo} уже активирован!",
+        "config_changed": "[PromoClaimer] ✅ Настройки изменены: {key} = {value}",
+        "logging_disabled": "[PromoClaimer] 🛑 Логирование отключено.",
+        "logging_enabled": "[PromoClaimer] ✅ Логирование включено.",
+        "_cls_doc": "Автоматически забирать промокоды для https://t.me/StableWaifuBot",
     }
 
     def __init__(self):
-        self.config = {"active": True, "tracked_chats": set()}
-        self.waifu_bot = "@StableWaifuBot"
-        self.promo_pattern = re.compile(r"https://t\.me/StableWaifuBot\?start=promo_(\w+)")
-        self.processed = set()
+        self.config = {
+            "enabled": True,  # Включение/выключение автоактивации промокодов
+            "processed": [],  # Обработанные промокоды
+            "max_claims_per_hour": 10,  # Максимальное количество активированных промокодов в час
+            "logging": True,  # Включение/выключение логирования
+        }
 
-    async def client_ready(self, client, db):
-        self.client, self.db = client, db
-        self.config = self.db.get("PromoClaimer", "config", self.config)
-
-    def save_config(self):
-        self.db.set("PromoClaimer", "config", self.config)
-
-    @loader.command(ru_doc="| Включить/выключить автоактивацию промокодов")
-    async def wpromo(self, message: Message):
-        """| Toggle promo activation"""
-        self.config["active"] = not self.config["active"]
-        self.save_config()
-        await utils.answer(message, self.strings["toggle_on"] if self.config["active"] else self.strings["toggle_off"])
-
-    @loader.command(ru_doc="| Включить/выключить отслеживание промокодов в этом чате")
-    async def wpromo_chat(self, message: Message):
-        """| Toggle promo tracking in this chat"""
-        chat_id = message.chat_id
-        if chat_id in self.config["tracked_chats"]:
-            self.config["tracked_chats"].remove(chat_id)
-            await utils.answer(message, self.strings["chat_off"])
+    def _update_logging(self):
+        """Обновляет настройки логирования в зависимости от конфигурации."""
+        if self.config["logging"]:
+            logger.setLevel(logging.INFO)
         else:
-            self.config["tracked_chats"].add(chat_id)
-            await utils.answer(message, self.strings["chat_on"])
-        self.save_config()
+            logger.setLevel(logging.CRITICAL)
 
-    @loader.command(ru_doc="| Проверить баланс токенов")
-    async def wbalance(self, message: Message):
-        """| Check token balance"""
-        async with self.client.conversation(self.waifu_bot) as conv:
-            msg = await conv.send_message("/tokens")
-            response = await conv.get_response()
-            await msg.delete()
-            await response.delete()
-        await utils.answer(message, self.strings["balance"].format(tokens=response.text.split()[0]))
+    @loader.command(ru_doc='| Включить или выключить автоактивацию промокодов')
+    async def wpromo(self, message: Message):
+        """| Включить или выключить автоактивацию промокодов"""
+        if self.config["enabled"]:
+            self.config["enabled"] = False
+            await utils.answer(message, "[PromoClaimer] ⛔️ Автоактивация промокодов выключена!")
+        else:
+            self.config["enabled"] = True
+            await utils.answer(message, "[PromoClaimer] ✅ Автоактивация промокодов включена!")
+
+    @loader.command(ru_doc='| Настроить максимальное количество активаций в час')
+    async def setmaxclaims(self, message: Message):
+        """| Настроить максимальное количество активаций промокодов в час"""
+        try:
+            value = int(message.text.split()[1])
+            self.config["max_claims_per_hour"] = value
+            await utils.answer(message, self.strings["config_changed"].format(key="max_claims_per_hour", value=value))
+        except (IndexError, ValueError):
+            await utils.answer(message, "❌ Пожалуйста, укажите корректное значение для максимального количества активаций.")
+
+    @loader.command(ru_doc='| Показать текущие настройки')
+    async def showconfig(self, message: Message):
+        """| Показать текущие настройки"""
+        config_info = "\n".join([f"{key}: {value}" for key, value in self.config.items()])
+        await utils.answer(message, f"Текущие настройки:\n{config_info}")
+
+    @loader.command(ru_doc='| Включить или выключить логирование')
+    async def togglelogging(self, message: Message):
+        """| Включить или выключить логирование"""
+        if self.config["logging"]:
+            self.config["logging"] = False
+            self._update_logging()
+            await utils.answer(message, self.strings["logging_disabled"])
+        else:
+            self.config["logging"] = True
+            self._update_logging()
+            await utils.answer(message, self.strings["logging_enabled"])
 
     @loader.watcher()
     async def watcher(self, message: Message):
-        """Отслеживание промокодов в чате"""
-        if not self.config["active"] or message.chat_id not in self.config["tracked_chats"]:
-            return
+        try:
+            if not self.config["enabled"]:
+                return
 
-        new_promos = set(self.promo_pattern.findall(message.text or "")) - self.processed
-        for promo in new_promos:
-            await self.activate_promo(promo)
-            self.processed.add(promo)
+            # Ищем промокоды в сообщениях
+            pattern = r'https://t\.me/StableWaifuBot\?start=promo_(\w+)'
+            matches = re.findall(pattern, message.text)
 
-    async def activate_promo(self, promo: str):
-        """Активация промокода"""
-        async with self.client.conversation(self.waifu_bot) as conv:
-            msg = await conv.send_message(f"/start promo_{promo}")
-            response = await conv.get_response()
-            await msg.delete()
-            await response.delete()
+            for match in matches:
+                promo = 'promo_' + match
+                if promo in self.config["processed"]:
+                    continue  # Пропускаем, если промокод уже был обработан
 
-        text = response.text
-        if "недействителен" in text:
-            logger.info(self.strings["promo_invalid"].format(promo=promo))
-        elif "уже активирован" in text:
-            logger.info(self.strings["promo_already"].format(promo=promo))
-        else:
-            amount = re.search(r"\(\+(\d+)", text)
-            logger.info(self.strings["promo_claimed"].format(promo=promo, amount=amount.group(1) if amount else "?"))
+                if len(self.config["processed"]) >= self.config["max_claims_per_hour"]:
+                    logger.info(f"❌ Достигнут предел активаций в час ({self.config['max_claims_per_hour']})")
+                    return
+
+                async with self.client.conversation('@StableWaifuBot') as conv:
+                    msg = await conv.send_message(f'/start {promo}')
+                    response = await conv.get_response()
+
+                    await conv.mark_read()
+                    await msg.delete()
+                    await response.delete()
+
+                # Если промокод недействителен
+                if response.text == '🥲 Промокод недействителен или уже истёк!':
+                    logger.info(self.strings("invalid_promo").format(promo=promo))
+                # Если промокод уже активирован
+                elif response.text == '❌ Этот промокод уже активирован, проверь выше!':
+                    logger.info(self.strings('already_claimed').format(promo=promo))
+                else:
+                    # Если промокод успешно активирован
+                    amount = response.text.split('(+')[1]
+                    logger.info(self.strings('claimed_promo').format(promo=promo, amount=amount))
+
+                # Добавляем промокод в список обработанных
+                self.config["processed"].append(promo)
+
+        except Exception as e:
+            if self.config["logging"]:
+                logger.error(self.strings['error_watcher'].format(e=str(e)))
