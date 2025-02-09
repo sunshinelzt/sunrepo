@@ -7,7 +7,7 @@ from .. import loader
 class GreetingModule(loader.Module):
     """Модуль для отправки сообщения о пополнении кошельков, настраиваемое через конфиг."""
     strings = {
-        "name": "yg_wallet",
+        "name": "sn_wallet",
         "config_wallet": "Твой TON-адрес",
         "config_crypto_link": "Ссылка на счет для пополнения через @CryptoBot",
         "config_xrocket_link": "Ссылка на счет для пополнения через @tonRocketBot"
@@ -39,7 +39,7 @@ class GreetingModule(loader.Module):
         xrocket_link = self.config["xrocket_link"]
 
         if not wallet or not crypto_link or not xrocket_link:
-            await message.edit("<b>Ошибка:</b> Все настройки должны быть заполнены. Используй команду .cfg yg_wallet для конфигурации.")
+            await message.edit("<b>Ошибка:</b> Все настройки должны быть заполнены. Используй команду .cfg sn_wallet для конфигурации.")
             return
 
         # Создание сообщения с информацией о пополнении
