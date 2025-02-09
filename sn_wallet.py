@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #meta developer @sunshinelzt
 
 from .. import loader
