@@ -25,5 +25,8 @@ class StableWaifuPromoMod(loader.Module):
         if not self.db.get("StableWaifuPromo", "watching", False):
             return
 
-        if match := re.search(r"https://t\.me/StableWaifuBot\?start=(promo_[\w\d]+)", message.raw_text):
-            await self.client.send_message("StableWaifuBot", f"/start {match.group(1)}")
+        # Ищем все ссылки в сообщении
+        links = re.findall(r"https://t\.me/StableWaifuBot\?start=(promo_[\w\d]+)", message.raw_text)
+
+        for link in links:
+            await self.client.send_message("StableWaifuBot", f"/start {link}")
