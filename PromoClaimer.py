@@ -42,7 +42,7 @@ class PromoClaimerMod(loader.Module):
         self.db.set("PromoClaimer", "enabled", self.enabled)
         await utils.answer(message, self.strings["enabled"] if self.enabled else self.strings["disabled"])
 
-    @loader..command(ru_doc="| Посмотреть баланс токенов")
+    @loader.command(ru_doc="| Посмотреть баланс токенов")
 async def checktokens(self, message: Message):
     """| Проверить баланс токенов"""
     try:
