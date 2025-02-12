@@ -10,8 +10,6 @@ logger = logging.getLogger('PromoClaimer')
 
 @loader.tds
 class PromoClaimerMod(loader.Module):
-    """Автоматически активирует промокоды из группы https://t.me/StableWaifu"""
-    
     strings = {
         "name": "PromoClaimer",
         "claimed_promo": "[PromoClaimer] 👌 Успешно активирован промокод {promo} на {amount} токенов!",
@@ -25,7 +23,6 @@ class PromoClaimerMod(loader.Module):
     GROUP_USERNAME = "StableWaifu"
 
     async def get_group_id(self):
-        """Получает и кеширует ID группы по юзернейму"""
         if not hasattr(self, "group_id"):
             entity = await self.client.get_entity(f"t.me/{self.GROUP_USERNAME}")
             self.group_id = entity.id
@@ -33,37 +30,35 @@ class PromoClaimerMod(loader.Module):
 
     async def client_ready(self, client, db):
         self.db = db
-        self.enabled = self.db.get("PromoClaimer", "enabled", True)  # Сохраняем статус включения
+        self.enabled = self.db.get("PromoClaimer", "enabled", True)
 
     @loader.command(ru_doc="| Включить/выключить автозабор промокодов")
     async def wpromo(self, message: Message):
-        """| Вкл/выкл автозабор промокодов"""
         self.enabled = not self.enabled
         self.db.set("PromoClaimer", "enabled", self.enabled)
         await utils.answer(message, self.strings["enabled"] if self.enabled else self.strings["disabled"])
 
     @loader.command(ru_doc="| Посмотреть баланс токенов")
-async def wcheck(self, message: Message):
-    try:
-        async with self.client.conversation('@StableWaifuBot') as conv:
-            await conv.send_message('/tokens')
-            response = await conv.get_response()
+    async def wcheck(self, message: Message):
+        try:
+            async with self.client.conversation('@StableWaifuBot') as conv:
+                await conv.send_message('/tokens')
+                response = await conv.get_response()
 
-            match = re.search(r"💵 Доступные токены:\s*(\d+)", response.text)
+                match = re.search(r"💵 Доступные токены:\s*(\d+)", response.text)
 
-            if match:
-                tokens = match.group(1)
-                await conv.mark_read()
-                await response.delete()
-                await utils.answer(message, f"Доступные токены: {tokens}")
-            else:
-                await utils.answer(message, "Не удалось найти количество токенов.")
-    except AlreadyInConversationError:
-        pass
+                if match:
+                    tokens = match.group(1)
+                    await conv.mark_read()
+                    await response.delete()
+                    await utils.answer(message, f"Доступные токены: {tokens}")
+                else:
+                    await utils.answer(message, "Не удалось найти количество токенов.")
+        except AlreadyInConversationError:
+            pass
 
     @loader.watcher(incoming=True, edited_messages=True)
     async def watcher(self, message: Message):
-        """Отслеживает промокоды только в группе @StableWaifu"""
         if not self.enabled or message.chat_id != await self.get_group_id():
             return
 
