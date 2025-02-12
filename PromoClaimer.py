@@ -42,19 +42,27 @@ class PromoClaimerMod(loader.Module):
         self.db.set("PromoClaimer", "enabled", self.enabled)
         await utils.answer(message, self.strings["enabled"] if self.enabled else self.strings["disabled"])
 
-    @loader.command(ru_doc="| Посмотреть баланс токенов")
-    async def checktokens(self, message: Message):
-        """| Проверить баланс токенов"""
-        try:
-            async with self.client.conversation('@StableWaifuBot') as conv:
-                await conv.send_message('/tokens')
-                response = await conv.get_response()
-                tokens = response.text.splitlines()[0]  # Берём первую строку
+    @loader..command(ru_doc="| Посмотреть баланс токенов")
+async def checktokens(self, message: Message):
+    """| Проверить баланс токенов"""
+    try:
+        async with self.client.conversation('@StableWaifuBot') as conv:
+            await conv.send_message('/tokens')
+            response = await 
+            
+            match = re.search(r"💵 Доступные токены:\s*(\d+)", response.text)
+
+            if match:
+                tokens = match.group(1)  # Извлекаем количество токенов
                 await conv.mark_read()
                 await response.delete()
-            await utils.answer(message, tokens)
-        except AlreadyInConversationError:
-            pass
+                await utils.answer(message, f"Доступные токены: {tokens}")
+
+            else:
+                await utils.answer(message, "Не удалось найти количество токенов.")
+
+    except AlreadyInConversationError:
+        pass
 
     @loader.watcher(incoming=True, edited_messages=True)
     async def watcher(self, message: Message):
