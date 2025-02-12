@@ -43,13 +43,12 @@ class PromoClaimerMod(loader.Module):
         await utils.answer(message, self.strings["enabled"] if self.enabled else self.strings["disabled"])
 
     @loader.command(ru_doc="| Посмотреть баланс токенов")
-async def checktokens(self, message: Message):
-    """| Проверить баланс токенов"""
+async def wcheck(self, message: Message):
     try:
         async with self.client.conversation('@StableWaifuBot') as conv:
             await conv.send_message('/tokens')
-            response = await 
-            
+            response = await conv.get_response()
+
             match = re.search(r"💵 Доступные токены:\s*(\d+)", response.text)
 
             if match:
@@ -57,10 +56,8 @@ async def checktokens(self, message: Message):
                 await conv.mark_read()
                 await response.delete()
                 await utils.answer(message, f"Доступные токены: {tokens}")
-
             else:
                 await utils.answer(message, "Не удалось найти количество токенов.")
-
     except AlreadyInConversationError:
         pass
 
