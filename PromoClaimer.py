@@ -22,7 +22,7 @@ class PromoClaimerMod(loader.Module):
         "disabled": "[PromoClaimer] ❌ Автозабор промокодов ВЫКЛЮЧЕН!",
     }
 
-    GROUP_USERNAME = "StableWaifu"  # Юзернейм группы
+    GROUP_USERNAME = "StableWaifu"
 
     async def get_group_id(self):
         """Получает и кеширует ID группы по юзернейму"""
@@ -53,7 +53,7 @@ async def checktokens(self, message: Message):
             match = re.search(r"💵 Доступные токены:\s*(\d+)", response.text)
 
             if match:
-                tokens = match.group(1)  # Извлекаем количество токенов
+                tokens = match.group(1)
                 await conv.mark_read()
                 await response.delete()
                 await utils.answer(message, f"Доступные токены: {tokens}")
@@ -68,7 +68,7 @@ async def checktokens(self, message: Message):
     async def watcher(self, message: Message):
         """Отслеживает промокоды только в группе @StableWaifu"""
         if not self.enabled or message.chat_id != await self.get_group_id():
-            return  # Игнорируем, если выключено или не та группа
+            return
 
         try:
             pattern = r'https://t\.me/StableWaifuBot\?start=promo_(\w+)'
