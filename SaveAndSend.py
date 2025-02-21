@@ -7,7 +7,7 @@ from datetime import datetime
 import re
 
 class SaveAndSendMod(loader.Module):
-    """Сохраняет сообщения из закрытых чатов и отправляет в текущий чат"""
+    """Сохраняет сообщения из любых чатов/каналов"""
 
     strings = {"name": "SaveAndSend"}
 
@@ -41,22 +41,16 @@ class SaveAndSendMod(loader.Module):
             # Удаляем команду
             await message.delete()
 
-            # Получаем данные отправителя
+            # Оформляем сообщение
             user = msg.sender
             user_mention = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>" if user else "👤 Неизвестный"
             timestamp = msg.date.strftime("%d.%m.%Y %H:%M") if msg.date else "Неизвестно"
             header = f"📩 <b>Сообщение от {user_mention}</b>\n🕒 <i>{timestamp}</i>\n\n"
-
-            # Текст сообщения
             text = msg.text or "📎 <i>Вложение</i>"
-
-            # Добавляем ссылку на оригинал (если доступно)
             link = f"\n🔗 <a href='{args}'>Оригинал</a>" if "t.me/" in args else ""
-
-            # Итоговый текст
             final_text = header + text + link
 
-            # Если есть медиа, скачиваем и отправляем
+            # Проверяем медиа
             if msg.media:
                 file = await self.client.download_media(msg)
                 await self.client.send_file(message.chat_id, file, caption=final_text, parse_mode="html")
