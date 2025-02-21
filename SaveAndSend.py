@@ -1,4 +1,4 @@
-#meta developer @sunshinelzt
+# meta developer @sunshinelzt
 
 from telethon import events
 from .. import loader, utils
