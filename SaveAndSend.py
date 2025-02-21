@@ -3,7 +3,6 @@
 from telethon import events
 from .. import loader, utils
 import os
-from datetime import datetime
 import re
 
 class SaveAndSendMod(loader.Module):
@@ -32,10 +31,11 @@ class SaveAndSendMod(loader.Module):
             chat_id = int("-100" + match.group(2)) if is_private else match.group(2)
             message_id = int(match.group(3))
 
-            # Получаем сообщение
-            msg = await self.client.get_messages(chat_id, ids=message_id)
-            if not msg:
-                await message.edit("<b>❌ Не удалось получить сообщение!</b>")
+            # Пробуем получить сообщение
+            try:
+                msg = await self.client.get_messages(chat_id, ids=message_id)
+            except:
+                await message.edit("<b>❌ Ошибка доступа к сообщению!</b>")
                 return
 
             # Удаляем команду
@@ -44,10 +44,9 @@ class SaveAndSendMod(loader.Module):
             # Оформляем сообщение
             user = msg.sender
             user_mention = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>" if user else "👤 Неизвестный"
-            timestamp = msg.date.strftime("%d.%m.%Y %H:%M") if msg.date else "Неизвестно"
-            header = f"📩 <b>Сообщение от {user_mention}</b>\n🕒 <i>{timestamp}</i>\n\n"
+            header = f"📩 <b>Сообщение от {user_mention}</b>\n\n"
             text = msg.text or "📎 <i>Вложение</i>"
-            link = f"\n🔗 <a href='{args}'>Оригинал</a>" if "t.me/" in args else ""
+            link = f"\n🔗 <a href='{args}'>Оригинал</a>"
             final_text = header + text + link
 
             # Проверяем медиа
