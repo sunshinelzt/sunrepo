@@ -4,6 +4,7 @@ from telethon import events
 from .. import loader, utils
 import os
 from datetime import datetime
+import re
 
 class SaveAndSendMod(loader.Module):
     """Сохраняет сообщения из закрытых чатов и отправляет в текущий чат"""
@@ -22,9 +23,14 @@ class SaveAndSendMod(loader.Module):
 
         try:
             # Разбираем ссылку
-            parts = args.split("/")
-            chat_id = int(parts[-3]) if parts[-3].isdigit() else parts[-3]
-            message_id = int(parts[-1])
+            match = re.search(r"t\.me/(c/)?(\d+|\w+)/(\d+)", args)
+            if not match:
+                await message.edit("<b>❌ Некорректная ссылка!</b>")
+                return
+
+            is_private = bool(match.group(1))  # Если есть 'c/', значит приватный чат
+            chat_id = int("-100" + match.group(2)) if is_private else match.group(2)
+            message_id = int(match.group(3))
 
             # Получаем сообщение
             msg = await self.client.get_messages(chat_id, ids=message_id)
@@ -45,7 +51,7 @@ class SaveAndSendMod(loader.Module):
             text = msg.text or "📎 <i>Вложение</i>"
 
             # Добавляем ссылку на оригинал (если доступно)
-            link = f"\n🔗 <a href='{args}'>Оригинал</a>" if "t.me/c/" in args or "t.me/" in args else ""
+            link = f"\n🔗 <a href='{args}'>Оригинал</a>" if "t.me/" in args else ""
 
             # Итоговый текст
             final_text = header + text + link
