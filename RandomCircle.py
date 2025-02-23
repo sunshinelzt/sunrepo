@@ -1,7 +1,7 @@
 # meta developer: @sunshinelzt
 
 import random
-from telethon.tl.types import InputPeerChannel
+from telethon.tl.types import InputPeerChannel, MessageMediaDocument
 from telethon.tl.functions.messages import GetHistoryRequest
 
 from .. import loader, utils
@@ -45,19 +45,17 @@ class RandomCircleMod(loader.Module):
             )
 
             circles = [
-                msg for msg in history.messages if msg.media and msg.media.document.mime_type == "video/mp4"
+                msg for msg in history.messages 
+                if isinstance(msg.media, MessageMediaDocument) and 
+                msg.media.document.attributes and 
+                any(attr for attr in msg.media.document.attributes if attr.__class__.__name__ == "DocumentAttributeVideo" and getattr(attr, 'round_message', False))
             ]
 
-            if not circles:
-                await message.edit("Не удалось найти кружочки.")
-                return
-
-            random_circle = random.choice(circles)
-
-            await message.client.send_message(
-                message.chat_id, file=random_circle.media.document
-            )
+            if circles:
+                random_circle = random.choice(circles)
+                await message.client.send_file(message.chat_id, file=random_circle.media.document)
+            
             await message.delete()
 
-        except Exception as e:
-            await message.edit(f"Произошла ошибка: {str(e)}")
+        except:
+            pass  # Игнорируем все ошибки
