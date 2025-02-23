@@ -12,33 +12,8 @@ class RandomCircleMod(loader.Module):
 
     strings = {"name": "RandomCircle"}
 
-    async def get_all_messages(self, client, peer):
-        all_messages = []
-        offset_id = 0
-
-        while True:
-            history = await client(
-                GetHistoryRequest(
-                    peer=peer,
-                    limit=100,
-                    offset_id=offset_id,
-                    max_id=0,
-                    min_id=0,
-                    add_offset=0,
-                    hash=0,
-                )
-            )
-
-            if not history.messages:
-                break
-
-            all_messages.extend(history.messages)
-            offset_id = history.messages[-1].id
-
-        return all_messages
-
     async def rccmd(self, message):
-        """Ищет и отправляет случайный кружочек"""
+        """Отправляет случайный кружочек."""
 
         channels_ids = [
             -1001678673876,
@@ -51,30 +26,38 @@ class RandomCircleMod(loader.Module):
             -1001869062957
         ]
 
-        random.shuffle(channels_ids)
-
         try:
-            for channel_id in channels_ids:
-                entity = await message.client.get_entity(channel_id)
-                peer = InputPeerChannel(entity.id, entity.access_hash)
+            random_channel_id = random.choice(channels_ids)
+            entity = await message.client.get_entity(random_channel_id)
+            peer = InputPeerChannel(entity.id, entity.access_hash)
 
-                all_messages = await self.get_all_messages(message.client, peer)
+            history = await message.client(
+                GetHistoryRequest(
+                    peer=peer,
+                    limit=100,
+                    offset_date=None,
+                    offset_id=0,
+                    max_id=0,
+                    min_id=0,
+                    add_offset=0,
+                    hash=0,
+                )
+            )
 
-                circles = [
-                    msg for msg in all_messages if msg.media and msg.media.document.mime_type == "video/mp4"
-                ]
+            circles = [
+                msg for msg in history.messages if msg.media and msg.media.document.mime_type == "video/mp4"
+            ]
 
-                if circles:
-                    random_circle = random.choice(circles)
-                    await message.client.send_message(
-                        message.chat_id, 
-                        file=random_circle.media.document, 
-                        message="Кружочек найден! @sunshinelzt"
-                    )
-                    await message.delete()
-                    return
+            if not circles:
+                await message.edit("Не удалось найти кружочки.")
+                return
 
-            await message.edit("Не удалось найти кружочки.")
+            random_circle = random.choice(circles)
+
+            await message.client.send_message(
+                message.chat_id, file=random_circle.media.document
+            )
+            await message.delete()
 
         except Exception as e:
             await message.edit(f"Произошла ошибка: {str(e)}")
