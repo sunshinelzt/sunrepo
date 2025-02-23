@@ -8,6 +8,8 @@ from .. import loader, utils
 
 @loader.tds
 class RandomCircleMod(loader.Module):
+    """Модуль для отправки случайного мемного кружочка"""
+
     strings = {"name": "RandomCircle"}
 
     async def get_all_messages(self, client, peer):
@@ -36,6 +38,8 @@ class RandomCircleMod(loader.Module):
         return all_messages
 
     async def rccmd(self, message):
+        """Ищет и отправляет случайный кружочек"""
+
         channels_ids = [
             -1001678673876,
             -1001829766952,
@@ -63,7 +67,9 @@ class RandomCircleMod(loader.Module):
                 if circles:
                     random_circle = random.choice(circles)
                     await message.client.send_message(
-                        message.chat_id, file=random_circle.media.document
+                        message.chat_id, 
+                        file=random_circle.media.document, 
+                        message="Кружочек найден! @sunshinelzt"
                     )
                     await message.delete()
                     return
