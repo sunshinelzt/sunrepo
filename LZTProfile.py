@@ -1,61 +1,60 @@
 # meta developer: @sunshinelzt
+# requires: requests
 
 import requests
 from hikka import loader, utils
 
-class LolzProfileMod(loader.Module):
-    strings = {"name": "LZTProfile"}
+class LolzProfile(loader.Module):
+    strings = {"name": "LolzProfile"}
     
     def __init__(self):
         self.config = loader.ModuleConfig("LOLZ_API_KEY", "", "API-ключ форума lolz.live")
 
     async def lolzcmd(self, message):
         args = utils.get_args_raw(message)
-        username = args if args else (await message.get_reply_message()).sender.username if message.is_reply else None
-
-        if not username:
+        if message.is_reply:
+            reply = await message.get_reply_message()
+            args = reply.sender.username if reply.sender else None
+        
+        if not args:
             return await message.edit("<b>⚠️ Укажи ник или сделай реплай!</b>")
 
-        user_info = await self.get_lolz_user(username)
+        user_info = await self.get_user_info(args)
         if not user_info:
-            return await message.edit("<b>🚫 Пользователь не найден или API-ключ недействителен!</b>")
+            return await message.edit("<b>🚫 Пользователь не найден или API-ключ неверный!</b>")
 
-        await message.edit(self.format_user_info(user_info), parse_mode="HTML")
+        await message.edit(self.format_profile(user_info), parse_mode="HTML")
 
-    async def get_lolz_user(self, query):
+    async def get_user_info(self, username):
         api_key = self.config["LOLZ_API_KEY"]
-        url = f"https://api.lolz.live/v1/users/{query}"
+        if not api_key:
+            return None
+
+        url = f"https://api.lolz.live/v1/users/{username}"
         headers = {"Authorization": f"Bearer {api_key}"}
 
         try:
             response = requests.get(url, headers=headers, timeout=10)
-            data = response.json()
-            return None if "error" in data else data
+            if response.status_code != 200:
+                return None
+            return response.json()
         except requests.RequestException:
             return None
 
-    def format_user_info(self, user):
-        status = "🔴 Заблокирован" if user.get('banned', False) else "🟢 Не заблокирован"
-
+    def format_profile(self, user):
         return (
-            f"╭━━━📌 <b>ЛОЛЗТИМ ПРОФИЛЬ</b>\n"
-            f"┣ 🆔 <b>ID:</b> {user.get('id', 'Неизвестно')}\n"
-            f"┣ 👤 <b>Ник:</b> <a href='https://lolz.live/members/{user.get('id', '')}/'>{user.get('nickname', 'Неизвестно')}</a>\n"
-            f"┣ 🏷 <b>Юзернейм:</b> @{user.get('username', 'Неизвестно')}\n"
-            f"┣ 🔗 <b>Группа:</b> {user.get('group', 'Неизвестно')}\n"
-            f"┣ 🎖 <b>Ранг:</b> {user.get('custom_title', '—')}\n"
-            f"┣ 🛡 <b>Статус:</b> {status}\n"
-            f"┣ 🗓 <b>Регистрация:</b> {user.get('registration_date', '—')}\n"
-            f"╰━━━━━━━━━━━━━━━━━━\n"
-            f"╭━━━📊 <b>СТАТИСТИКА</b>\n"
-            f"┣ 💬 <b>Сообщений:</b> {user.get('messages', 0)}\n"
-            f"┣ ❤️ <b>Лайков:</b> {user.get('likes', 0)}\n"
-            f"┣ 🔥 <b>Реакций:</b> {user.get('reactions', 0)}\n"
-            f"┣ 🎁 <b>Розыгрышей:</b> {user.get('raffles', 0)}\n"
-            f"┣ 🏆 <b>Трофеев:</b> {user.get('trophies', 0)}\n"
-            f"╰━━━━━━━━━━━━━━━━━━\n"
-            f"╭━━━👥 <b>СОЦИАЛЬНОЕ</b>\n"
-            f"┣ 👤 <b>Подписчики:</b> {user.get('followers', 0)}\n"
-            f"┣ 🤝 <b>Подписок:</b> {user.get('following', 0)}\n"
-            f"╰━━━━━━━━━━━━━━━━━━"
+            f"👤 <b>Профиль:</b> <a href='https://lolz.live/members/{user['id']}/'>{user['nickname']}</a>\n"
+            f"🆔 <b>ID:</b> {user['id']}\n"
+            f"🏷 <b>Юзернейм:</b> @{user['username']}\n"
+            f"🔗 <b>Группа:</b> {user['group']}\n"
+            f"📝 <b>Статус:</b> {user.get('custom_title', '—')}\n"
+            f"🛡 <b>Аккаунт:</b> {'🔴 Заблокирован' if user.get('banned', False) else '🟢 Активен'}\n"
+            f"📅 <b>Регистрация:</b> {user['registration_date']}\n"
+            f"💬 <b>Сообщений:</b> {user['messages']}\n"
+            f"❤️ <b>Лайков:</b> {user['likes']}\n"
+            f"🔥 <b>Реакций:</b> {user['reactions']}\n"
+            f"🎁 <b>Розыгрышей:</b> {user['raffles']}\n"
+            f"🏆 <b>Трофеев:</b> {user['trophies']}\n"
+            f"👥 <b>Подписчики:</b> {user['followers']}\n"
+            f"📌 <b>Подписки:</b> {user['following']}\n"
         )
