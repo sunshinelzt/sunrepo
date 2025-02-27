@@ -1,11 +1,17 @@
 # meta developer: @sunshinelzt
 
-import LOLZTEAM
-from telethon.tl.functions.users import GetFullUserRequest
-from hikka import loader, utils
+import sys
+
+try:
+    import LOLZTEAM
+    from telethon.tl.functions.users import GetFullUserRequest
+    from hikka import loader, utils
+except ImportError as e:
+    missing_module = str(e).split("'")[1]
+    sys.exit(f"❌ Ошибка: отсутствует зависимость '{missing_module}'. Установи её командой:\n\npip install {missing_module}")
 
 class LolzProfile(loader.Module):
-    """Модуль для получения информации о профиле пользователя на форуме lolz.live"""
+    """Модуль для получения информации о профиле пользователя на lolz.live"""
     strings = {"name": "LolzProfile"}
 
     def __init__(self):
@@ -22,7 +28,7 @@ class LolzProfile(loader.Module):
 
     async def lolzcmd(self, message):
         """Использование: .lolz <реплай/@юзернейм/ник>
-        Получает информацию о профиле пользователя на lolz.live.
+        Получает информацию о профиле пользователя на lolz.live по Telegram-юзернейму или нику.
         """
         args = utils.get_args_raw(message)
         tg_username = None
