@@ -1,18 +1,18 @@
 # meta developer: @sunshinelzt
 
 import sys
+from hikka import loader, utils
+from telethon.tl.functions.users import GetFullUserRequest
 
 try:
     import LOLZTEAM
-    from telethon.tl.functions.users import GetFullUserRequest
-    from hikka import loader, utils
-except ImportError as e:
-    missing_module = str(e).split("'")[1]
-    sys.exit(f"❌ Ошибка: отсутствует зависимость '{missing_module}'. Установи её командой:\n\npip install {missing_module}")
+except ImportError:
+    sys.exit("❌ Ошибка: отсутствует библиотека 'LOLZTEAM'. Установи её:\n\npip install LOLZTEAM")
 
-class LolzProfile(loader.Module):
-    """Модуль для получения информации о профиле пользователя на lolz.live"""
-    strings = {"name": "LolzProfile"}
+class LolzInfo(loader.Module):
+    """Получает информацию о пользователе с форума lolz.live по API"""
+
+    strings = {"name": "LolzInfo"}
 
     def __init__(self):
         self.config = loader.ModuleConfig(
@@ -23,13 +23,11 @@ class LolzProfile(loader.Module):
     async def client_ready(self, client, db):
         api_key = self.config["LOLZ_API_KEY"]
         if api_key:
-            self.client = LOLZTEAM.Client(api_key)
+            self.client = LOLZTEAM.Forum(api_key)
         self.tg_client = client
 
     async def lolzcmd(self, message):
-        """Использование: .lolz <реплай/@юзернейм/ник>
-        Получает информацию о профиле пользователя на lolz.live по Telegram-юзернейму или нику.
-        """
+        """Использование: .lolz <реплай/@юзернейм/ник>"""
         args = utils.get_args_raw(message)
         tg_username = None
         forum_nickname = None
@@ -47,7 +45,7 @@ class LolzProfile(loader.Module):
         elif forum_nickname:
             user_info = await self.get_user_info_by_nickname(forum_nickname)
         else:
-            return await message.edit("<b>🚫 Укажите никнейм или ответьте на сообщение.</b>")
+            return await message.edit("<b>🚫 Укажите ник или ответьте на сообщение.</b>")
 
         if not user_info:
             return await message.edit("<b>🚫 Пользователь не найден!</b>")
@@ -67,7 +65,7 @@ class LolzProfile(loader.Module):
         if not self.client:
             return None
         try:
-            response = self.client.user.search(username=tg_username)
+            response = self.client.users.search(username=tg_username)
             return response[0] if response else None
         except Exception:
             return None
@@ -77,25 +75,24 @@ class LolzProfile(loader.Module):
         if not self.client:
             return None
         try:
-            return self.client.user.get(nickname)
+            return self.client.users.get(nickname)
         except Exception:
             return None
 
     def format_profile(self, user):
-        """Форматирует информацию о пользователе для отображения."""
+        """Форматирует информацию о пользователе для вывода."""
         return (
-            f"👤 <b>Профиль:</b> <a href='https://lolz.live/members/{user.id}/'>{user.username}</a>\n"
-            f"🆔 <b>ID:</b> {user.id}\n"
-            f"🏷 <b>Группа:</b> {user.group_title}\n"
-            f"📝 <b>Статус:</b> {user.custom_title or '—'}\n"
-            f"📅 <b>Регистрация:</b> {user.register_date}\n"
-            f"📊 <b>Статистика:</b>\n"
-            f"   💬 Сообщений: {user.message_count}\n"
-            f"   ❤️ Лайков: {user.like_count}\n"
-            f"   🔥 Реакций: {user.reaction_score}\n"
-            f"   🎁 Розыгрышей: {user.raffle_count}\n"
-            f"   🏆 Трофеев: {user.trophy_points}\n"
-            f"   👥 Подписчики: {user.followers_count}\n"
-            f"   📌 Подписки: {user.following_count}\n"
-            f"🛡 <b>Аккаунт:</b> {'🔴 Заблокирован' if user.is_banned else '🟢 Активен'}"
+            f"👤 <b>Пользователь:</b> <a href='https://lolz.live/members/{user.id}/'>{user.username}</a>\n"
+            f"🔗 <b>Профиль LZT:</b> {user.nickname}\n"
+            f"ℹ️ <b>Группа:</b> {user.group_title}\n"
+            f"📝 <b>Статус:</b> {user.status}\n"
+            f"💬 <b>Сообщений:</b> {user.messages}\n"
+            f"💚 <b>Симпатий:</b> {user.likes}\n"
+            f"👍 <b>Лайков:</b> {user.likes_count}\n"
+            f"🎁 <b>Розыгрышей:</b> {user.giveaways}\n"
+            f"🏆 <b>Трофеев:</b> {user.trophies}\n"
+            f"👥 <b>Подписчиков:</b> {user.followers}\n"
+            f"👤 <b>Подписок:</b> {user.subscriptions}\n"
+            f"⏳ <b>Дата регистрации:</b> {user.registration_date}\n"
+            f"✅ <b>Заблокирован:</b> {'Да' if user.banned else 'Нет'}"
         )
