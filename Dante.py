@@ -1,4 +1,4 @@
-from hikkatl import loader, utils
+from hikka import loader, utils
 import subprocess
 import os
 
