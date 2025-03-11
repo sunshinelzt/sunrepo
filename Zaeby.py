@@ -40,15 +40,15 @@ class ZaebyMod(loader.Module):
                 break
             try:
                 msg = await message.client.send_message(chat_id, text)
-                await asyncio.sleep(random.uniform(0.2, 0.5))  # Рандомная задержка
+                await asyncio.sleep(random.uniform(0.2))
                 await msg.delete()
             except Exception:
-                break  # Останавливаемся, если телега ругается
+                break
 
         self.running.pop(chat_id, None)
 
-    async def stopzaebcmd(self, message):
-        """.stopzaeb — Остановить заёбывание"""
+    async def szaebcmd(self, message):
+        """.szaeb — Остановить заёбывание"""
         chat_id = message.chat_id
         if chat_id in self.running:
             self.running[chat_id] = False
