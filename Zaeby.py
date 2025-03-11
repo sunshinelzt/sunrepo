@@ -30,7 +30,7 @@ class ZaebyMod(loader.Module):
 
         user_id = reply.sender_id
         args = utils.get_args(message)
-        count = int(args[0]) if args and args[0].isdigit() and int(args[0]) > 0 else self.config["DEFAULT_COUNT"]
+        count = int(args[0]) if args and args[0].isdigit() and int(args[0]) > 0 else self.config["default_count"]
         chat_id = message.chat_id
 
         if chat_id in self.running:
