@@ -40,15 +40,15 @@ class ZaebyMod(loader.Module):
         self.running[chat_id] = True
         await message.delete()
 
-        text = f'<a href="tg://user?id={user_id}">{self.config["MESSAGE_TEXT"]}</a>'
+        text = f'<a href="tg://user?id={user_id}">{self.config["message_text"]}</a>'
 
         for _ in range(count):
             if not self.running.get(chat_id):
                 break
             try:
                 msg = await message.client.send_message(chat_id, text)
-                await asyncio.sleep(random.uniform(self.config["MIN_DELAY"], self.config["MAX_DELAY"]))
-                if self.config["AUTO_DELETE"]:
+                await asyncio.sleep(random.uniform(self.config["min_delay"], self.config["max_delay"]))
+                if self.config["auto_delete"]:
                     await msg.delete()
             except Exception:
                 break
