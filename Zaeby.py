@@ -9,7 +9,7 @@ def register(cb):
 
 class ZaebyMod(loader.Module):
     """Заебет любого"""
-    strings = {'name': 'Заёбушка'}
+    strings = {'name': 'Zaeby'}
     
     def __init__(self):
         self.config = loader.ModuleConfig(
