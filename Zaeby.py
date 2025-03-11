@@ -22,7 +22,7 @@ class ZaebyMod(loader.Module):
         self.running = {}
 
     async def zaebcmd(self, message):
-        """.zaeb <количество> <реплай> — Начать заёбывание"""
+        """<количество> <реплай> — Начать заёбывание"""
         reply = await message.get_reply_message()
         if not reply:
             await message.edit("<b>А кого заёбывать-то?</b>")
@@ -56,7 +56,7 @@ class ZaebyMod(loader.Module):
         self.running.pop(chat_id, None)
 
     async def szaebcmd(self, message):
-        """.szaeb — Остановить заёбывание"""
+        """— Остановить заёбывание"""
         chat_id = message.chat_id
         if chat_id in self.running:
             self.running[chat_id] = False
