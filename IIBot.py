@@ -59,7 +59,7 @@ class iibotMod(loader.Module):
 
         return await utils.answer(m, self.strings("need_arg").format(self.strings("pref")))
 
-    async def blacklisticmd(self, m: types.Message):
+    async def blacklistiicmd(self, m: types.Message):
         """Добавить/удалить пользователя из чёрного списка"""
         reply = await m.get_reply_message()
         args = utils.get_args_raw(m)
