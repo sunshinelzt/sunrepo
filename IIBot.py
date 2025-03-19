@@ -100,6 +100,15 @@ class iibotMod(loader.Module):
         if ch != 0 and random.randint(0, ch) != 0:
             return
 
+        if m.photo:
+            await m.reply(m.photo)
+        elif m.sticker:
+            await m.reply(m.sticker)
+        elif m.video:
+            await m.reply(m.video)
+        elif m.gif:
+            await m.reply(m.gif)
+
         words = [word for word in m.raw_text.split() if len(word) >= 3]
         if not words:
             return
