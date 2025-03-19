@@ -14,9 +14,9 @@ class iibotMod(loader.Module):
         "status": "{}{}",
         "on": "{}Включён",
         "off": "{}Выключен",
-        "blacklist_add": "{}Добавлен в чёрный список: {}",
-        "blacklist_remove": "{}Удалён из чёрного списка: {}",
-        "blacklist_list": "{}Чёрный список пользователей: {}",
+        "blacklistii_add": "{}Добавлен в чёрный список: {}",
+        "blacklistii_remove": "{}Удалён из чёрного списка: {}",
+        "blacklistii_list": "{}Чёрный список пользователей: {}",
     }
     _db_name = "iibot"
 
@@ -71,16 +71,16 @@ class iibotMod(loader.Module):
         else:
             return await utils.answer(m, self.strings("need_arg").format(self.strings("pref")))
 
-        blacklist = set(self.config["BLACKLIST"])
+        blacklistii = set(self.config["blacklist"])
 
-        if user_id in blacklist:
-            blacklist.remove(user_id)
-            self.config["BLACKLIST"] = list(blacklist)
-            return await utils.answer(m, self.strings("blacklist_remove").format(self.strings("pref"), user_id))
+        if user_id in blacklistii:
+            blacklistii.remove(user_id)
+            self.config["blacklist"] = list(blacklistii)
+            return await utils.answer(m, self.strings("blacklistii_remove").format(self.strings("pref"), user_id))
         else:
-            blacklist.add(user_id)
-            self.config["BLACKLIST"] = list(blacklist)
-            return await utils.answer(m, self.strings("blacklist_add").format(self.strings("pref"), user_id))
+            blacklistii.add(user_id)
+            self.config["blacklist"] = list(blacklistii)
+            return await utils.answer(m, self.strings("blacklistii_add").format(self.strings("pref"), user_id))
 
     async def watcher(self, m: types.Message):
         if not isinstance(m, types.Message) or not m.chat:
@@ -106,16 +106,17 @@ class iibotMod(loader.Module):
 
         search_word = random.choice(words)
         msgs = [
-            x async for x in m.client.iter_messages(chat_id, search=search_word) if x.replies and x.replies.max_id
+            x async for x in m.client.iter_messages(chat_id, search=search_word)
+            if getattr(x, "replies", None) and x.replies.max_id
         ]
         if not msgs:
             return
 
         replier = random.choice(msgs)
         sid, eid = replier.id, replier.replies.max_id
+
         reply_msgs = [
-            x async for x in m.client.iter_messages(chat_id, ids=list(range(sid + 1, eid + 1)))
-            if x and x.reply_to and x.reply_to.reply_to_msg_id == sid
+            x async for x in m.client.iter_messages(chat_id, reply_to=sid)
         ]
         if not reply_msgs:
             return
