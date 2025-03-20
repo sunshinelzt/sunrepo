@@ -1,15 +1,16 @@
 # meta developer
 
-from .. import loader, utils
+from telethon import loader, utils
 import logging
-import lolzteam
+from LOLZTEAM.Client import Forum, Market
 from telethon import Button
+import asyncio
 
 logger = logging.getLogger(__name__)
 
 @loader.tds
 class LolzTransferMod(loader.Module):
-    """Идеальный модуль перевода денег на lolz.live"""
+    """Модуль перевода денег на lolz.live с улучшениями"""
     strings = {"name": "LolzTransfer"}
 
     def __init__(self):
@@ -20,23 +21,24 @@ class LolzTransferMod(loader.Module):
             "HOLD_OPTION", "hour", "Единица времени холда (hour/day)"
         )
         self.market = None
+        self.forum = Forum(token=self.config["API_KEY"])
+        self.market = Market(token=self.config["API_KEY"])
 
     async def client_ready(self, client, db):
         self.client = client
-        self.market = lolzteam.Market(self.config["API_KEY"])
 
     async def lolzmcmd(self, message):
         """Перевод: .lolzm ник сумма валюта [комментарий]"""
         args = utils.get_args_raw(message).split()
 
         if len(args) < 3:
-            await message.edit("❌ <b>Использование:</b> <code>.lolzm ник 100 rub [комментарий]</code>")
+            await message.edit("❌ <b>Использование:</b> <code>.lolzm ник сумма валюта [комментарий]</code>")
             return
 
         nickname, amount, currency = args[:3]
         comment = " ".join(args[3:]) if len(args) > 3 else "Без комментария"
 
-        user = self.get_user(nickname)
+        user = await self.get_user_by_nickname(nickname)
         if not user:
             await message.edit(f"❌ <b>Пользователь</b> <code>{nickname}</code> <b>не найден на lolz.live.</b>")
             return
@@ -56,21 +58,21 @@ class LolzTransferMod(loader.Module):
 
         await self.client.send_message(message.chat_id, text, buttons=buttons, parse_mode='html')
 
-    def get_user(self, nickname):
-        """Поиск пользователя по нику"""
+    async def get_user_by_nickname(self, nickname):
+        """Поиск пользователя по нику на форуме"""
         try:
-            user = self.market.user.get(nickname)
-            return {"id": user.user_id, "name": user.username}
+            response = await self.forum.users.get(nickname=nickname)
+            return {"id": response["user_id"], "name": response["username"]}
         except Exception as e:
-            logger.error(f"Ошибка поиска пользователя: {e}")
+            logger.error(f"Ошибка при поиске пользователя {nickname}: {e}")
             return None
 
     async def on_callback_query(self, call):
-        """Обработка кнопок"""
+        """Обработка inline кнопок для подтверждения или отмены перевода"""
         data = call.data.decode("utf-8")
         if data.startswith("confirm_"):
             _, user_id, amount, currency, comment = data.split("_", 4)
-            response = self.transfer_funds(user_id, amount, currency, comment)
+            response = await self.transfer_funds(user_id, amount, currency, comment)
             if response.get("success"):
                 await call.answer("✅ Перевод успешно выполнен!", alert=True)
             else:
@@ -79,10 +81,10 @@ class LolzTransferMod(loader.Module):
         elif data == "cancel":
             await call.answer("❌ Перевод отменён.", alert=True)
 
-    def transfer_funds(self, user_id, amount, currency, comment):
-        """Отправка перевода"""
+    async def transfer_funds(self, user_id, amount, currency, comment):
+        """Функция для выполнения перевода средств"""
         try:
-            response = self.market.payments.transfer(
+            response = await self.market.payments.transfer(
                 amount=float(amount),
                 currency=currency.lower(),
                 secret_answer=self.config["SECRET_PHRASE"],
@@ -93,5 +95,5 @@ class LolzTransferMod(loader.Module):
             )
             return response.json()
         except Exception as e:
-            logger.error(f"Ошибка при переводе: {e}")
-            return {"error": "Произошла ошибка при переводе."}
+            logger.error(f"Ошибка при выполнении перевода: {e}")
+            return {"error": "Произошла ошибка при перевода."}
