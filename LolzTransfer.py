@@ -2,70 +2,71 @@
 
 from .. import loader, utils
 import logging
-import requests
+import lolzteam
 from telethon import Button
 
 logger = logging.getLogger(__name__)
 
 @loader.tds
 class LolzTransferMod(loader.Module):
-    """Идеальный перевод денег на lolz.live по нику"""
+    """Идеальный модуль перевода денег на lolz.live"""
     strings = {"name": "LolzTransfer"}
 
     def __init__(self):
         self.config = loader.ModuleConfig(
             "API_KEY", "", "API ключ от lolz.live",
-            "SECRET_PHRASE", "", "Секретная фраза для переводов"
+            "SECRET_PHRASE", "", "Секретная фраза для переводов",
+            "HOLD_TIME", 0, "Длительность холда (0 - без холда)",
+            "HOLD_OPTION", "hour", "Единица времени холда (hour/day)"
         )
+        self.market = None
 
     async def client_ready(self, client, db):
         self.client = client
+        self.market = lolzteam.Market(self.config["API_KEY"])
 
     async def lolzmcmd(self, message):
-        """Перевод денег: .lolzm ник сумма валюта [комментарий]"""
+        """Перевод: .lolzm ник сумма валюта [комментарий]"""
         args = utils.get_args_raw(message).split()
 
         if len(args) < 3:
-            await message.edit("❌ Использование: `.lolzm ник 100 rub [комментарий]`")
+            await message.edit("❌ <b>Использование:</b> <code>.lolzm ник 100 rub [комментарий]</code>")
             return
 
         nickname, amount, currency = args[:3]
         comment = " ".join(args[3:]) if len(args) > 3 else "Без комментария"
 
-        user_id, username = await self.get_user_info(nickname)
-        if not user_id:
-            await message.edit(f"❌ Пользователь `{nickname}` не найден на lolz.live.")
+        user = self.get_user(nickname)
+        if not user:
+            await message.edit(f"❌ <b>Пользователь</b> <code>{nickname}</code> <b>не найден на lolz.live.</b>")
             return
 
-        profile_url = f"https://lolz.live/members/{user_id}/"
-        text = (f"💸 <b>Вы собираетесь перевести</b>: <code>{amount} {currency.upper()}</code>\n"
-                f"👤 <b>Получатель</b>: <a href='{profile_url}'>{username}</a>\n"
-                f"💬 <b>Комментарий</b>: <i>{comment}</i>")
+        profile_url = f"https://lolz.live/members/{user['id']}/"
+        text = (
+            f"💸 <b>Вы собираетесь перевести</b>: <code>{amount} {currency.upper()}</code>\n"
+            f"👤 <b>Получатель</b>: <a href='{profile_url}'>{user['name']}</a>\n"
+            f"💬 <b>Комментарий</b>: <i>{comment}</i>\n"
+            f"⏳ <b>Холд</b>: {self.config['HOLD_TIME']} {self.config['HOLD_OPTION']}"
+        )
 
         buttons = [
-            [Button.inline("✅ Подтвердить", data=f"confirm_{user_id}_{amount}_{currency}_{comment}"),
+            [Button.inline("✅ Подтвердить", data=f"confirm_{user['id']}_{amount}_{currency}_{comment}"),
              Button.inline("❌ Отмена", data="cancel")]
         ]
 
         await self.client.send_message(message.chat_id, text, buttons=buttons, parse_mode='html')
 
-    async def get_user_info(self, nickname):
-        """Получение ID и ника пользователя с lolz.live"""
-        url = f"https://api.lolz.live/v1/user/{nickname}"
-        headers = {"Authorization": f"Bearer {self.config['API_KEY']}"}
+    def get_user(self, nickname):
+        """Поиск пользователя по нику"""
         try:
-            response = requests.get(url, headers=headers, timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("user_id"), data.get("username")
-        except requests.exceptions.Timeout:
-            logger.error("⏳ API Lolz.live не отвечает (таймаут)")
+            user = self.market.user.get(nickname)
+            return {"id": user.user_id, "name": user.username}
         except Exception as e:
-            logger.error(f"Ошибка API Lolz: {e}")
-        return None, None
+            logger.error(f"Ошибка поиска пользователя: {e}")
+            return None
 
     async def on_callback_query(self, call):
-        """Обработка нажатий на инлайн-кнопки"""
+        """Обработка кнопок"""
         data = call.data.decode("utf-8")
         if data.startswith("confirm_"):
             _, user_id, amount, currency, comment = data.split("_", 4)
@@ -79,23 +80,18 @@ class LolzTransferMod(loader.Module):
             await call.answer("❌ Перевод отменён.", alert=True)
 
     def transfer_funds(self, user_id, amount, currency, comment):
-        """Отправка перевода через API Lolz.live"""
-        url = "https://api.lolz.live/v1/market/transfer"
-        headers = {"Authorization": f"Bearer " + self.config["API_KEY"]}
-        data = {
-            "receiver": user_id,
-            "amount": amount,
-            "currency": currency,
-            "comment": comment,
-            "secret_answer": self.config["SECRET_PHRASE"],
-            "transfer_hold": "no"
-        }
+        """Отправка перевода"""
         try:
-            response = requests.post(url, headers=headers, json=data, timeout=5)
+            response = self.market.payments.transfer(
+                amount=float(amount),
+                currency=currency.lower(),
+                secret_answer=self.config["SECRET_PHRASE"],
+                user_id=int(user_id),
+                comment=comment,
+                hold=self.config["HOLD_TIME"],
+                hold_option=self.config["HOLD_OPTION"]
+            )
             return response.json()
-        except requests.exceptions.Timeout:
-            logger.error("⏳ API Lolz.live не отвечает (таймаут)")
-            return {"error": "Сервер lolz.live не отвечает. Попробуйте позже."}
         except Exception as e:
             logger.error(f"Ошибка при переводе: {e}")
             return {"error": "Произошла ошибка при переводе."}
