@@ -42,7 +42,7 @@ class iibotMod(loader.Module):
         self.db.set(self._db_name, "chats", list(chats))
 
     async def randomicmd(self, m: types.Message):
-        """Установить шанс 1 к N.\n0 - всегда отвечать."""
+        """Установить шанс 1 к N.\n0 - всегда обрабатывать."""
         args = utils.get_args_raw(m)
         if args.isdigit():
             self.db.set(self._db_name, "chance", int(args))
@@ -85,5 +85,6 @@ class iibotMod(loader.Module):
         ]
         if not reply_msgs:
             return
-
-        await m.reply(random.choice(reply_msgs))
+        
+        # Бот обрабатывает сообщение, но не отвечает
+        _ = random.choice(reply_msgs)  # Просто используем, чтобы не отвечать
