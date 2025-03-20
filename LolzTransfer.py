@@ -1,18 +1,18 @@
 # meta developer
 
 import requests
-import urllib.parse
+from bs4 import BeautifulSoup
 from telethon import events, Button
-from telethon.tl.custom import Message
 from hikka import loader, utils
+from telethon.tl.custom import Message
 
 class LolzTransferMod(loader.Module):
-    """Модуль для перевода денег на Lolz.live"""
+    """Модуль для перевода средств на Lolz.live с улучшенным поиском через BeautifulSoup"""
     strings = {"name": "LolzTransfer"}
 
     def __init__(self):
         self.config = loader.ModuleConfig(
-            "api_key", "", "API-ключ от LolzTeam (Lolz.live)",
+            "api_key", "", "API-ключ для Zelenka (Lolz.live)",
             "secret_phrase", "", "Секретная фраза для переводов",
             "hold_time", 0, "Длительность холда (0 = без холда)",
             "hold_unit", "hour", "Единица времени холда (hour/day)"
@@ -51,26 +51,37 @@ class LolzTransferMod(loader.Module):
         await self.client.send_message(message.chat_id, text, buttons=buttons, parse_mode='html')
 
     async def find_user(self, nickname: str):
-        """Поиск пользователя по нику"""
-        url = f"https://api.zelenka.guru/users/find?username={urllib.parse.quote(nickname)}"
-        headers = {"Authorization": f"Bearer {self.config['api_key']}"}
+        """Поиск пользователя по нику с использованием BeautifulSoup"""
+        url = f"https://zelenka.guru/search?query={nickname}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
+        }
 
         try:
             response = requests.get(url, headers=headers)
-            data = response.json()
-            if response.status_code == 200 and "user_id" in data:
-                return {"id": data["user_id"], "name": data["username"]}
-        except requests.RequestException as e:
+            response.raise_for_status()  # Генерирует исключение, если статус ответа не 200
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # Поиск нужной информации, предполагаем что результаты будут в каком-то контейнере с классом 'user-item'
+            user_item = soup.find("div", class_="user-item")
+            if not user_item:
+                return None  # Если пользователя не найдено
+
+            user_id = user_item["data-user-id"]
+            user_name = user_item.find("span", class_="username").text.strip()
+
+            return {"id": user_id, "name": user_name}
+        except requests.exceptions.RequestException as e:
             return None
 
     async def on_callback_query(self, call):
-        """Обработка кнопок"""
+        """Обработка inline кнопок для подтверждения или отмены перевода"""
         data = call.data.decode("utf-8")
         if data.startswith("confirm_"):
             _, user_id, amount, currency, comment = data.split("_", 4)
             response = await self.transfer_funds(user_id, amount, currency, comment)
             if response.get("success"):
-                await call.answer("✅ Перевод выполнен!", alert=True)
+                await call.answer("✅ Перевод успешно выполнен!", alert=True)
             else:
                 error = response.get("error", "Ошибка при переводе.")
                 await call.answer(f"❌ {error}", alert=True)
@@ -78,21 +89,24 @@ class LolzTransferMod(loader.Module):
             await call.answer("❌ Перевод отменён.", alert=True)
 
     async def transfer_funds(self, user_id, amount, currency, comment):
-        """Перевод денег"""
-        url = "https://api.lzt.market/balance/transfer"
-        headers = {"Authorization": f"Bearer {self.config['api_key']}"}
-        data = {
-            "amount": float(amount),
-            "currency": currency.lower(),
-            "secret_answer": self.config["secret_phrase"],
-            "user_id": int(user_id),
-            "comment": comment,
-            "hold": self.config["hold_time"],
-            "hold_option": self.config["hold_unit"]
-        }
-
+        """Функция для выполнения перевода средств"""
         try:
-            response = requests.post(url, headers=headers, json=data)
+            url = "https://api.lzt.market/balance/transfer"
+            headers = {
+                "Authorization": f"Bearer {self.config['api_key']}",
+                "Content-Type": "application/json"
+            }
+            data = {
+                "amount": float(amount),
+                "currency": currency.lower(),
+                "secret_answer": self.config["secret_phrase"],
+                "user_id": user_id,
+                "comment": comment,
+                "hold_time": self.config["hold_time"],
+                "hold_unit": self.config["hold_unit"]
+            }
+            response = requests.post(url, json=data, headers=headers)
+            response.raise_for_status()  # Генерирует исключение для ненормальных ответов
             return response.json()
-        except requests.RequestException:
-            return {"error": "Ошибка при отправке запроса."}
+        except requests.exceptions.RequestException as e:
+            return {"error": "Произошла ошибка при переводе."}
