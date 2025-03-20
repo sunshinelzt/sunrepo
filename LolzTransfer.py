@@ -1,17 +1,27 @@
 # meta developer
 
-from telethon import loader, utils
+from hikkatl import utils
+from hikkatl.tl.types import Message
+from hikkatl.events import CallbackQuery
 import logging
 from LOLZTEAM.Client import Forum, Market
-from telethon import Button
 import asyncio
 import re
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-@loader.tds
-class LolzTransferMod(loader.Module):
+class Config:
+    def __init__(self):
+        self.API_KEY = ""
+        self.SECRET_PHRASE = ""
+        self.HOLD_TIME = 0
+        self.HOLD_OPTION = "hour"
+        self.DEFAULT_CURRENCY = "rub"
+        self.AUTO_CONFIRM = False
+        self.TRANSFER_LIMIT = 1000
+
+class LolzTransferMod:
     """Модуль перевода денег на lolz.live с расширенными возможностями"""
     strings = {
         "name": "LolzTransfer",
@@ -30,15 +40,7 @@ class LolzTransferMod(loader.Module):
     }
 
     def __init__(self):
-        self.config = loader.ModuleConfig(
-            "API_KEY", "", "API ключ от lolz.live",
-            "SECRET_PHRASE", "", "Секретная фраза для переводов",
-            "HOLD_TIME", 0, "Длительность холда (0 - без холда)",
-            "HOLD_OPTION", "hour", "Единица времени холда (hour/day)",
-            "DEFAULT_CURRENCY", "rub", "Валюта по умолчанию (usd/eur/rub)",
-            "AUTO_CONFIRM", False, "Автоматическое подтверждение переводов без запроса (True/False)",
-            "TRANSFER_LIMIT", 1000, "Лимит суммы перевода (0 - без лимита)"
-        )
+        self.config = Config()
         self.market = None
         self.forum = None
 
@@ -50,23 +52,23 @@ class LolzTransferMod(loader.Module):
         
     def _initialize_api(self):
         """Инициализация API клиентов"""
-        if self.config["API_KEY"]:
+        if self.config.API_KEY:
             try:
-                self.market = Market(token=self.config["API_KEY"])
-                self.forum = Forum(token=self.config["API_KEY"])
+                self.market = Market(token=self.config.API_KEY)
+                self.forum = Forum(token=self.config.API_KEY)
             except Exception as e:
                 logger.error(f"Ошибка инициализации API: {e}")
                 self.market = None
                 self.forum = None
 
-    async def lolzconfigcmd(self, message):
+    async def lolzconfig_cmd(self, message: Message):
         """Настройка параметров модуля: .lolzconfig параметр значение"""
         args = utils.get_args(message)
         
         if len(args) < 2:
             config_info = "\n".join([
-                f"🔹 <b>{key}</b>: <code>{self.config[key] if key != 'SECRET_PHRASE' and key != 'API_KEY' else '***'}</code>"
-                for key in self.config
+                f"🔹 <b>{key}</b>: <code>{getattr(self.config, key) if key != 'SECRET_PHRASE' and key != 'API_KEY' else '***'}</code>"
+                for key in vars(self.config)
             ])
             await message.edit(f"⚙️ <b>Текущие настройки:</b>\n\n{config_info}\n\n"
                                f"<b>Использование:</b> <code>.lolzconfig параметр значение</code>")
@@ -84,8 +86,8 @@ class LolzTransferMod(loader.Module):
         elif param == "AUTO_CONFIRM":
             value = value.lower() in ["true", "1", "yes", "да"]
         
-        if param in self.config:
-            self.config[param] = value
+        if hasattr(self.config, param):
+            setattr(self.config, param, value)
             # Переинициализация API при изменении ключа
             if param == "API_KEY":
                 self._initialize_api()
@@ -93,7 +95,7 @@ class LolzTransferMod(loader.Module):
         else:
             await message.edit(f"❌ <b>Параметр {param} не существует</b>")
 
-    async def lolzmcmd(self, message):
+    async def lolzm_cmd(self, message: Message):
         """Перевод: .lolzm ник сумма [валюта] [комментарий]"""
         if not self.market or not self.forum:
             self._initialize_api()
@@ -123,8 +125,8 @@ class LolzTransferMod(loader.Module):
             return
             
         # Проверка лимита перевода
-        if self.config["TRANSFER_LIMIT"] > 0 and amount > self.config["TRANSFER_LIMIT"]:
-            await message.edit(f"❌ <b>Превышен лимит перевода ({self.config['TRANSFER_LIMIT']}).</b>")
+        if self.config.TRANSFER_LIMIT > 0 and amount > self.config.TRANSFER_LIMIT:
+            await message.edit(f"❌ <b>Превышен лимит перевода ({self.config.TRANSFER_LIMIT}).</b>")
             return
             
         # Определение валюты
@@ -132,7 +134,7 @@ class LolzTransferMod(loader.Module):
             currency = args[2].lower()
             comment_start = 3
         else:
-            currency = self.config["DEFAULT_CURRENCY"]
+            currency = self.config.DEFAULT_CURRENCY
             comment_start = 2
             
         comment = " ".join(args[comment_start:]) if len(args) > comment_start else f"Перевод от {datetime.now().strftime('%d.%m.%Y %H:%M')}"
@@ -154,7 +156,7 @@ class LolzTransferMod(loader.Module):
             return
 
         # Автоподтверждение или запрос на подтверждение
-        if self.config["AUTO_CONFIRM"]:
+        if self.config.AUTO_CONFIRM:
             response = await self.transfer_funds(user["id"], amount, currency, comment)
             if response.get("success"):
                 transaction_id = response.get("transfer_id", "N/A")
@@ -177,12 +179,15 @@ class LolzTransferMod(loader.Module):
                 f"👤 <b>Получатель</b>: <a href='{profile_url}'>{user['name']}</a>\n"
                 f"💰 {balance_info}\n"
                 f"💬 <b>Комментарий</b>: <i>{comment}</i>\n"
-                f"⏳ <b>Холд</b>: {self.config['HOLD_TIME']} {self.config['HOLD_OPTION']}"
+                f"⏳ <b>Холд</b>: {self.config.HOLD_TIME} {self.config.HOLD_OPTION}"
             )
 
+            # Использование Inline кнопок HikkaTL
             buttons = [
-                [Button.inline("✅ Подтвердить", data=f"confirm_{user['id']}_{amount}_{currency}_{comment}"),
-                 Button.inline("❌ Отмена", data="cancel")]
+                [
+                    {"text": "✅ Подтвердить", "data": f"confirm_{user['id']}_{amount}_{currency}_{comment}"},
+                    {"text": "❌ Отмена", "data": "cancel"}
+                ]
             ]
 
             try:
@@ -192,7 +197,7 @@ class LolzTransferMod(loader.Module):
                 logger.error(f"Ошибка при отправке сообщения: {e}")
                 await message.edit("❌ Произошла ошибка при отправке сообщения.")
 
-    async def lolzbalancecmd(self, message):
+    async def lolzbalance_cmd(self, message: Message):
         """Показать баланс на Lolz"""
         if not self.market:
             self._initialize_api()
@@ -210,7 +215,7 @@ class LolzTransferMod(loader.Module):
         balance_text = "\n".join([f"🔹 <b>{currency.upper()}</b>: <code>{amount}</code>" for currency, amount in balance.items()])
         await message.edit(self.strings["balance_info"].format(balance_text))
 
-    async def lolzhistorycmd(self, message):
+    async def lolzhistory_cmd(self, message: Message):
         """Показать историю переводов: .lolzhistory [количество]"""
         if not self.market:
             self._initialize_api()
@@ -293,7 +298,7 @@ class LolzTransferMod(loader.Module):
             logger.error(f"Ошибка при получении баланса: {e}")
             return None
 
-    async def on_callback_query(self, call):
+    async def callback_handler(self, call: CallbackQuery):
         """Обработка inline кнопок для подтверждения или отмены перевода"""
         data = call.data.decode("utf-8")
         
@@ -360,11 +365,11 @@ class LolzTransferMod(loader.Module):
             response = await self.market.payments.transfer(
                 amount=amount,
                 currency=currency,
-                secret_answer=self.config["SECRET_PHRASE"],
+                secret_answer=self.config.SECRET_PHRASE,
                 user_id=int(user_id),
                 comment=comment,
-                hold=self.config["HOLD_TIME"],
-                hold_option=self.config["HOLD_OPTION"]
+                hold=self.config.HOLD_TIME,
+                hold_option=self.config.HOLD_OPTION
             )
             return response.json()
         except Exception as e:
