@@ -7,7 +7,7 @@ from .. import loader, utils
 @loader.tds
 class iibotMod(loader.Module):
     strings = {
-        "name": "iibot",
+        "name": "IIBot",
         "pref": "<b>ii</b> ",
         "need_arg": "{}Нужен аргумент",
         "status": "{}{}",
@@ -24,25 +24,25 @@ class iibotMod(loader.Module):
         return v.lower() in {"yes", "y", "true", "1", "on", "enable", "start", "да"}
 
     async def iicmd(self, m: types.Message):
-        """Переключить режим дурачка в чате"""
+        """Переключить режим работы в чате"""
         if not m.chat:
             return
 
         args = utils.get_args_raw(m)
         chat_id = m.chat.id
-        chats = set(self.db.get(self._db_name, "chats", []))
+        active_chats = set(self.db.get(self._db_name, "chats", []))
 
         if self.str2bool(args):
-            chats.add(chat_id)
+            active_chats.add(chat_id)
             await utils.answer(m, self.strings("on").format(self.strings("pref")))
         else:
-            chats.discard(chat_id)
+            active_chats.discard(chat_id)
             await utils.answer(m, self.strings("off").format(self.strings("pref")))
 
-        self.db.set(self._db_name, "chats", list(chats))
+        self.db.set(self._db_name, "chats", list(active_chats))
 
     async def randomicmd(self, m: types.Message):
-        """Установить шанс 1 к N.\n0 - всегда обрабатывать."""
+        """Установить шанс 1 к N. 0 - всегда обрабатывать."""
         args = utils.get_args_raw(m)
         if args.isdigit():
             self.db.set(self._db_name, "chance", int(args))
@@ -51,7 +51,7 @@ class iibotMod(loader.Module):
         return await utils.answer(m, self.strings("need_arg").format(self.strings("pref")))
 
     async def watcher(self, m: types.Message):
-        if not isinstance(m, types.Message) or not m.chat:
+        if not isinstance(m, types.Message) or not m.chat or not m.raw_text.strip():
             return
 
         chat_id = m.chat.id
@@ -60,31 +60,35 @@ class iibotMod(loader.Module):
         if m.sender_id == (await m.client.get_me()).id:
             return
 
-        ch = self.db.get(self._db_name, "chance", 0)
-        if ch != 0 and random.randint(0, ch) != 0:
+        # Проверяем вероятность ответа
+        chance = self.db.get(self._db_name, "chance", 0)
+        if chance != 0 and random.randint(0, chance) != 0:
             return
 
-        words = [
-            word for word in m.raw_text.split() if len(word) >= 3
-        ]
+        # Разбиваем текст на слова и фильтруем короткие и незначимые
+        words = [word for word in m.raw_text.split() if len(word) > 1]
         if not words:
             return
 
         search_word = random.choice(words)
+
+        # Ищем сообщения по слову
         msgs = [
-            x async for x in m.client.iter_messages(chat_id, search=search_word) if x.replies and x.replies.max_id
+            msg async for msg in m.client.iter_messages(chat_id, search=search_word) if msg.replies and msg.replies.max_id
         ]
         if not msgs:
             return
 
-        replier = random.choice(msgs)
-        sid, eid = replier.id, replier.replies.max_id
+        base_msg = random.choice(msgs)
+        sid, eid = base_msg.id, base_msg.replies.max_id
+
+        # Ищем ответы на это сообщение
         reply_msgs = [
-            x async for x in m.client.iter_messages(chat_id, ids=list(range(sid + 1, eid + 1)))
-            if x and x.reply_to and x.reply_to.reply_to_msg_id == sid
+            msg async for msg in m.client.iter_messages(chat_id, ids=list(range(sid + 1, eid + 1)))
+            if msg and msg.reply_to and msg.reply_to.reply_to_msg_id == sid
         ]
         if not reply_msgs:
             return
-        
-        # Бот обрабатывает сообщение, но не отвечает
-        _ = random.choice(reply_msgs)  # Просто используем, чтобы не отвечать
+
+        # Отправляем случайное найденное сообщение без reply
+        await m.client.send_message(chat_id, random.choice(reply_msgs).raw_text)
