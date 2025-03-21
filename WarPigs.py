@@ -32,12 +32,12 @@ class WarpigsMod(loader.Module):
             await message.respond(f"/{command}")
             await asyncio.sleep(86410)
 
-    @loader.command
+    @loader.command(ru_doc="Включает/отключает авто-рост свиньи.")
     async def agrow(self, message):
         """Включает/отключает авто-рост"""
         await self.auto_action(message, "pig_growth", "grow")
 
-    @loader.command
+    @loader.command(ru_doc="Включает/отключает авто-бой свиньи.")
     async def afight(self, message):
         """Включает/отключает авто-бой"""
         await self.auto_action(message, "pig_fights", "fight")
