@@ -3,9 +3,9 @@
 from .. import loader, utils
 import asyncio
 
+
 class WarpigsMod(loader.Module):
     """Автоматизирует работу с @warpigs_bot"""
-    
 
     strings = {
         "name": "WarPigs",
@@ -15,23 +15,29 @@ class WarpigsMod(loader.Module):
         "pig_fights_off": "<emoji document_id=5316581501360420451>⚔️</emoji> <b>Авто-бой свиньи: <i>Отключен.</i></b>",
     }
 
+    def __init__(self):
+        self.config = loader.ModuleConfig(
+            "pig_growth", False, "Статус авто-роста",
+            "pig_fights", False, "Статус авто-боя"
+        )
+
     async def auto_action(self, message, key, command):
         """Переключает авто-режим"""
-        running = self.get(key, False)
-        self.set(key, not running)
+        running = self.config[key]
+        self.config[key] = not running
 
-        if running:
-            return await utils.answer(message, self.strings[f"{key}_off"])
+        await utils.answer(message, self.strings[f"{key}_on"] if not running else self.strings[f"{key}_off"])
 
-        await utils.answer(message, self.strings[f"{key}_on"])
-        while self.get(key):
+        while self.config[key]:
             await message.respond(f"/{command}")
             await asyncio.sleep(86410)
 
+    @loader.command
     async def agrow(self, message):
         """Включает/отключает авто-рост"""
         await self.auto_action(message, "pig_growth", "grow")
 
+    @loader.command
     async def afight(self, message):
         """Включает/отключает авто-бой"""
         await self.auto_action(message, "pig_fights", "fight")
