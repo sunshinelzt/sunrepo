@@ -1,4 +1,4 @@
-__version__ = (1, 4, 8, 8)
+__version__ = (1, 5, 0, 0)
 
 # meta developer: @sunshinelzt
 
@@ -287,7 +287,7 @@ class SunshineChecksActivator(loader.Module):
             ),
             loader.ConfigValue(
                 "delay",
-                1.5,
+                3.0,  # Increased from 1.5 to reduce spam
                 doc="Задержка в секундах перед активацией чека",
                 validator=loader.validators.Float(minimum=0, maximum=10),
             ),
@@ -305,13 +305,13 @@ class SunshineChecksActivator(loader.Module):
             ),
             loader.ConfigValue(
                 "try_case_variants",
-                True,
+                False,  # Disabled by default to reduce spam
                 doc="Пробовать разные варианты регистра (обе версии - с большой и маленькой буквы)",
                 validator=loader.validators.Boolean()
             ),
             loader.ConfigValue(
                 "password_attempts",
-                3,
+                2,  # Reduced from 3 to reduce spam
                 doc="Количество попыток подбора пароля",
                 validator=loader.validators.Integer(minimum=1, maximum=10),
             ),
@@ -375,13 +375,13 @@ class SunshineChecksActivator(loader.Module):
             ),
             loader.ConfigValue(
                 "cooldown_enabled",
-                False,
+                True,  # Enabled by default to reduce spam
                 doc="Ограничение частоты активации чеков (защита от спама)",
                 validator=loader.validators.Boolean()
             ),
             loader.ConfigValue(
                 "cooldown_time",
-                10,
+                20,  # Increased from 10 to reduce spam
                 doc="Время задержки между активациями чеков (в секундах)",
                 validator=loader.validators.Integer(minimum=1, maximum=60),
             ),
@@ -397,10 +397,18 @@ class SunshineChecksActivator(loader.Module):
                 doc="Автоочистка записей старше указанного количества дней",
                 validator=loader.validators.Integer(minimum=1, maximum=365),
             ),
+            loader.ConfigValue(
+                "password_cooldown",
+                5.0,  # New setting to add delay between password attempts
+                doc="Задержка между попытками ввода пароля (в секундах)",
+                validator=loader.validators.Float(minimum=1, maximum=30),
+            ),
         )
         self.db = None
         self.active_password_sessions = set()
         self.last_activation_time = 0
+        self.last_password_time = 0
+        self.current_check_id = None
         self.emoji_collection = {
             "butterfly": [
                 "<emoji document_id=5931703809800672260>🦋</emoji>",
@@ -525,6 +533,7 @@ class SunshineChecksActivator(loader.Module):
             (self.check_handler, events.NewMessage),
             (self.channel_subscription_handler, events.NewMessage),
             (self.password_handler, events.NewMessage),
+            (self.password_feedback_handler, events.NewMessage),
         ]
 
         for handler, event_type in handlers:
@@ -572,7 +581,85 @@ class SunshineChecksActivator(loader.Module):
         self.db.set("SunshineChecksActivator", "sent_codes", self.sent_codes)
         
         return deleted_count
-    
+
+    async def password_feedback_handler(self, message):
+        """Обработчик обратной связи от бота о попытках ввода пароля"""
+        
+        if not hasattr(message, 'sender_id') or message.sender_id != self.cryptobot_id:
+            return
+            
+        if not hasattr(message, 'text') or not message.text:
+            return
+        
+        check_id = self.current_check_id
+        
+        # Если нет активного чека, попробуем найти ID в сообщении
+        if not check_id:
+            match = re.search(r'CQ[A-Za-z0-9_-]+', message.text)
+            if match:
+                check_id = match.group(0)
+            else:
+                # Если не нашли в сообщении, попробуем посмотреть предыдущие сообщения
+                try:
+                    async for msg in self.client.iter_messages(self.cryptobot_id, limit=3):
+                        if msg.sender_id == self.cryptobot_id:
+                            match = re.search(r'CQ[A-Za-z0-9_-]+', msg.text)
+                            if match:
+                                check_id = match.group(0)
+                                break
+                except Exception as e:
+                    logger.debug(f"Ошибка при поиске check_id в истории: {e}")
+        
+        if not check_id:
+            return
+        
+        # Обработка сообщения "Чек уже активирован"
+        if any(phrase in message.text for phrase in ["Этот чек уже активирован", "This check has already been activated"]):
+            if check_id in self.active_password_sessions:
+                self.active_password_sessions.discard(check_id)
+            
+            if check_id in self.sent_codes:
+                self.sent_codes[check_id]["activated"] = True
+                self.sent_codes[check_id]["exhausted"] = True
+                self.db.set("SunshineChecksActivator", "sent_codes", self.sent_codes)
+            
+            logger.info(f"Чек {check_id} уже активирован. Прекращаем попытки.")
+            self.current_check_id = None
+            return
+        
+        # Обработка сообщения "Неверный пароль"
+        if any(phrase in message.text for phrase in ["Пароль не верный", "Incorrect password"]):
+            if check_id in self.sent_codes:
+                if "attempt_count" not in self.sent_codes[check_id]:
+                    self.sent_codes[check_id]["attempt_count"] = 1
+                else:
+                    self.sent_codes[check_id]["attempt_count"] += 1
+                
+                # Если достигли максимального количества попыток, помечаем как исчерпанный
+                if self.sent_codes[check_id].get("attempt_count", 0) >= self.config["password_attempts"]:
+                    self.sent_codes[check_id]["exhausted"] = True
+                    if check_id in self.active_password_sessions:
+                        self.active_password_sessions.discard(check_id)
+                    
+                self.db.set("SunshineChecksActivator", "sent_codes", self.sent_codes)
+            
+            # Не сбрасываем current_check_id, чтобы можно было сделать еще попытки
+            return
+        
+        # Обработка успешной активации
+        if any(phrase in message.text.lower() for phrase in ["вы получили", "you received", "успешно активирован", "successfully activated"]):
+            if check_id in self.active_password_sessions:
+                self.active_password_sessions.discard(check_id)
+            
+            if check_id in self.sent_codes:
+                self.sent_codes[check_id]["activated"] = True
+                self.sent_codes[check_id]["exhausted"] = True
+                self.db.set("SunshineChecksActivator", "sent_codes", self.sent_codes)
+                
+            logger.info(f"Чек {check_id} успешно активирован с паролем.")
+            self.current_check_id = None
+            return
+
     async def check_handler(self, message):
         """Обработчик сообщений для поиска и активации чеков"""
         
@@ -599,40 +686,27 @@ class SunshineChecksActivator(loader.Module):
                 
             codes, stars_codes, testnet_codes = await self.extract_codes(message.text, message.entities, message.reply_markup)
             
+            # Проверка кулдауна перед активацией любого чека
+            if self.config["cooldown_enabled"] and (codes or stars_codes or testnet_codes):
+                current_time = time.time()
+                if current_time - self.last_activation_time < self.config["cooldown_time"]:
+                    logger.debug("Активация пропущена из-за кулдауна")
+                    return
+                self.last_activation_time = current_time
+            
             if codes:
                 for code in codes:
-                    if code not in self.sent_codes:
-                        if code.startswith('CQ'):
-                            if self.config["cooldown_enabled"]:
-                                current_time = time.time()
-                                if current_time - self.last_activation_time < self.config["cooldown_time"]:
-                                    continue
-                                self.last_activation_time = current_time
-                            
-                            self.sent_codes[code] = {"activated": True, "time": time.time()}
-                            self.db.set("SunshineChecksActivator", "sent_codes", self.sent_codes)
-                            
-                            try:
-                                await message.mark_read()
-                            except Exception as e:
-                                logger.debug(f"Не удалось отметить сообщение как прочитанное: {e}")
-                                
-                            start_time = time.time()
-                            await asyncio.sleep(self.config["delay"])
-                            await self.client.send_message(self.cryptobot_id, f"/start {code}")
-                            
-                            activation_record = {"code": code, "time": time.time(), "type": "regular"}
-                            self.sunshine_history.append(activation_record)
-                            self.db.set("SunshineChecksActivator", "history", list(self.sunshine_history))
-                            
-                            elapsed = time.time() - start_time
-                            activation_msg = self.strings["check_activated"].format(code, elapsed)
-                            await self.send_log(message, code, activation_msg)
-            
-            if stars_codes:
-                for stars_code in stars_codes:
-                    if stars_code not in self.sent_codes:
-                        self.sent_codes[stars_code] = {"activated": True, "time": time.time()}
+                    # Проверка, был ли чек уже обработан
+                    if code in self.sent_codes and isinstance(self.sent_codes[code], dict) and self.sent_codes[code].get("exhausted", False):
+                        logger.debug(f"Чек {code} уже был обработан ранее. Пропуск.")
+                        continue
+                        
+                    if code.startswith('CQ'):
+                        self.sent_codes[code] = {
+                            "activated": True, 
+                            "time": time.time(),
+                            "exhausted": False
+                        }
                         self.db.set("SunshineChecksActivator", "sent_codes", self.sent_codes)
                         
                         try:
@@ -640,38 +714,80 @@ class SunshineChecksActivator(loader.Module):
                         except Exception as e:
                             logger.debug(f"Не удалось отметить сообщение как прочитанное: {e}")
                             
-                        result = await self.claim_stars(f"https://app.send.tg/stars/{stars_code}", "send")
-                        if result:
-                            activation_record = {"code": stars_code, "time": time.time(), "type": "stars"}
-                            self.sunshine_history.append(activation_record)
-                            self.db.set("SunshineChecksActivator", "history", list(self.sunshine_history))
-                            
-                            stars_msg = self.strings["stars_received"].format(result["stars"], result["gifted_by"])
-                            await self.log(stars_msg)
+                        start_time = time.time()
+                        await asyncio.sleep(self.config["delay"])
+                        await self.client.send_message(self.cryptobot_id, f"/start {code}")
+                        
+                        activation_record = {"code": code, "time": time.time(), "type": "regular"}
+                        self.sunshine_history.append(activation_record)
+                        self.db.set("SunshineChecksActivator", "history", list(self.sunshine_history))
+                        
+                        elapsed = time.time() - start_time
+                        activation_msg = self.strings["check_activated"].format(code, elapsed)
+                        await self.send_log(message, code, activation_msg)
+            
+            if stars_codes:
+                for stars_code in stars_codes:
+                    # Проверка, был ли звездный чек уже обработан
+                    if stars_code in self.sent_codes and isinstance(self.sent_codes[stars_code], dict) and self.sent_codes[stars_code].get("exhausted", False):
+                        logger.debug(f"Звездный чек {stars_code} уже был обработан ранее. Пропуск.")
+                        continue
+                        
+                    self.sent_codes[stars_code] = {
+                        "activated": True, 
+                        "time": time.time(),
+                        "exhausted": False
+                    }
+                    self.db.set("SunshineChecksActivator", "sent_codes", self.sent_codes)
+                    
+                    try:
+                        await message.mark_read()
+                    except Exception as e:
+                        logger.debug(f"Не удалось отметить сообщение как прочитанное: {e}")
+                        
+                    result = await self.claim_stars(f"https://app.send.tg/stars/{stars_code}", "send")
+                    if result:
+                        activation_record = {"code": stars_code, "time": time.time(), "type": "stars"}
+                        self.sunshine_history.append(activation_record)
+                        self.db.set("SunshineChecksActivator", "history", list(self.sunshine_history))
+                        
+                        self.sent_codes[stars_code]["exhausted"] = True
+                        self.db.set("SunshineChecksActivator", "sent_codes", self.sent_codes)
+                        
+                        stars_msg = self.strings["stars_received"].format(result["stars"], result["gifted_by"])
+                        await self.log(stars_msg)
             
             if testnet_codes and self.config["testnet"]:
                 for testnet_code in testnet_codes:
-                    if testnet_code not in self.sent_codes:
-                        if testnet_code.startswith('CQ'):
-                            self.sent_codes[testnet_code] = {"activated": True, "time": time.time()}
-                            self.db.set("SunshineChecksActivator", "sent_codes", self.sent_codes)
+                    # Проверка, был ли тестнет чек уже обработан
+                    if testnet_code in self.sent_codes and isinstance(self.sent_codes[testnet_code], dict) and self.sent_codes[testnet_code].get("exhausted", False):
+                        logger.debug(f"Тестнет чек {testnet_code} уже был обработан ранее. Пропуск.")
+                        continue
+                        
+                    if testnet_code.startswith('CQ'):
+                        self.sent_codes[testnet_code] = {
+                            "activated": True, 
+                            "time": time.time(),
+                            "exhausted": False
+                        }
+                        self.db.set("SunshineChecksActivator", "sent_codes", self.sent_codes)
+                        
+                        try:
+                            await message.mark_read()
+                        except Exception as e:
+                            logger.debug(f"Не удалось отметить сообщение как прочитанное: {e}")
                             
-                            try:
-                                await message.mark_read()
-                            except Exception as e:
-                                logger.debug(f"Не удалось отметить сообщение как прочитанное: {e}")
-                                
-                            start_time = time.time()
-                            await asyncio.sleep(self.config["delay"])
-                            await self.client.send_message(self.testnet_id, f"/start {testnet_code}")
-                            
-                            activation_record = {"code": testnet_code, "time": time.time(), "type": "testnet"}
-                            self.sunshine_history.append(activation_record)
-                            self.db.set("SunshineChecksActivator", "history", list(self.sunshine_history))
-                            
-                            elapsed = time.time() - start_time
-                            activation_msg = self.strings["check_activated"].format(testnet_code, elapsed)
-                            await self.send_log(message, testnet_code, activation_msg)
+                        start_time = time.time()
+                        await asyncio.sleep(self.config["delay"])
+                        await self.client.send_message(self.testnet_id, f"/start {testnet_code}")
+                        
+                        activation_record = {"code": testnet_code, "time": time.time(), "type": "testnet"}
+                        self.sunshine_history.append(activation_record)
+                        self.db.set("SunshineChecksActivator", "history", list(self.sunshine_history))
+                        
+                        elapsed = time.time() - start_time
+                        activation_msg = self.strings["check_activated"].format(testnet_code, elapsed)
+                        await self.send_log(message, testnet_code, activation_msg)
                             
         except Exception as e:
             logger.error(f"Ошибка при активации чека: {e}", exc_info=True)
@@ -702,26 +818,31 @@ class SunshineChecksActivator(loader.Module):
                                     try:
                                         await self.client(ImportChatInviteRequest(invite_code))
                                         subscribed.append(invite_code)
-                                        await asyncio.sleep(0.5)
+                                        await asyncio.sleep(1.0)  # Увеличенная задержка между подписками
                                     except Exception as e:
                                         logger.warning(f"Не удалось подписаться на канал {invite_code}: {e}")
+                
+                # Небольшая задержка перед нажатием кнопки подтверждения
+                await asyncio.sleep(2.0)
                 
                 if hasattr(event, 'reply_markup') and event.reply_markup:
                     if hasattr(event.reply_markup, 'rows') and event.reply_markup.rows:
                         try:
-                            await asyncio.sleep(1)
                             await event.click(data=b'check-subscribe')
-                            await asyncio.sleep(1)
+                            # Увеличенная задержка после нажатия кнопки
+                            await asyncio.sleep(2.0)
                         except Exception as e:
                             logger.warning(f"Не удалось нажать на кнопку подтверждения подписки: {e}")
                 
+                # Задержка перед отпиской для уменьшения подозрений
                 if self.config["unsubscribe"] and subscribed:
+                    await asyncio.sleep(3.0)
                     for invite_code in subscribed:
                         try:
                             channel_info = await self.client(CheckChatInviteRequest(hash=invite_code))
                             channel = channel_info.chat
                             await self.client(LeaveChannelRequest(channel))
-                            await asyncio.sleep(0.5)
+                            await asyncio.sleep(1.0)  # Увеличенная задержка между отписками
                         except Exception as e:
                             logger.warning(f"Не удалось отписаться от канала {invite_code}: {e}")
                             
@@ -745,6 +866,13 @@ class SunshineChecksActivator(loader.Module):
             
         try:
             if any(phrase in message.text for phrase in ["Введите пароль от чека для получения", "Enter the password for this check to receive"]):
+                # Проверка и ограничение частоты попыток подбора пароля
+                current_time = time.time()
+                if current_time - self.last_password_time < self.config["password_cooldown"]:
+                    logger.debug("Слишком частые попытки подбора пароля. Пропуск.")
+                    return
+                self.last_password_time = current_time
+                
                 check_id = None
                 match = re.search(r'CQ[A-Za-z0-9_-]+', message.text)
                 if match:
@@ -752,17 +880,31 @@ class SunshineChecksActivator(loader.Module):
                 else:
                     check_id = f"check_{int(time.time())}"
                 
+                # Сохраняем текущий чек ID для отслеживания обратной связи
+                self.current_check_id = check_id
+                
+                # Проверка, не обрабатывается ли уже этот чек
                 if check_id in self.active_password_sessions:
                     logger.info(f"Пароль для чека {check_id} уже обрабатывается. Пропуск.")
                     return
                 
-                if check_id in self.sent_codes and isinstance(self.sent_codes[check_id], dict) and self.sent_codes[check_id].get("password_tried", False):
-                    logger.info(f"Для чека {check_id} уже был введен пароль. Пропуск.")
-                    return
+                # Проверка, исчерпан ли лимит попыток
+                if check_id in self.sent_codes and isinstance(self.sent_codes[check_id], dict):
+                    if self.sent_codes[check_id].get("exhausted", False):
+                        logger.info(f"Для чека {check_id} исчерпаны попытки ввода пароля. Пропуск.")
+                        return
+                    
+                    # Если мы уже пытались подобрать пароль, проверяем, сколько попыток сделано
+                    if "attempt_count" in self.sent_codes[check_id] and self.sent_codes[check_id]["attempt_count"] >= self.config["password_attempts"]:
+                        logger.info(f"Для чека {check_id} исчерпаны все попытки ({self.sent_codes[check_id]['attempt_count']}). Пропуск.")
+                        self.sent_codes[check_id]["exhausted"] = True
+                        self.db.set("SunshineChecksActivator", "sent_codes", self.sent_codes)
+                        return
                 
                 self.active_password_sessions.add(check_id)
                 
                 try:
+                    # Извлечение описания для подбора пароля
                     description = ""
                     if hasattr(message, 'raw_text') and message.raw_text:
                         lines = message.raw_text.split("\n")
@@ -774,61 +916,100 @@ class SunshineChecksActivator(loader.Module):
                         self.active_password_sessions.discard(check_id)
                         return
                     
+                    # Подбор пароля с помощью ИИ
                     result = await self.generate_password(description)
                     
                     if result:
+                        # Если результат - список вариантов
                         if isinstance(result, list):
+                            # Ограничиваем количество попыток
                             attempts = min(len(result), self.config["password_attempts"])
                             for i in range(attempts):
                                 pwd = result[i]
+                                
+                                # Отправка пароля
                                 await self.client.send_message(self.cryptobot_id, pwd)
                                 
+                                # Обновление информации в базе данных
                                 if check_id.startswith('CQ'):
                                     if check_id in self.sent_codes:
                                         self.sent_codes[check_id]["password_tried"] = True
                                         self.sent_codes[check_id]["password"] = pwd
+                                        if "attempt_count" not in self.sent_codes[check_id]:
+                                            self.sent_codes[check_id]["attempt_count"] = 1
+                                        else:
+                                            self.sent_codes[check_id]["attempt_count"] += 1
                                     else:
                                         self.sent_codes[check_id] = {
                                             "activated": True, 
                                             "time": time.time(),
                                             "password_tried": True,
-                                            "password": pwd
+                                            "password": pwd,
+                                            "attempt_count": 1,
+                                            "exhausted": False
                                         }
                                     self.db.set("SunshineChecksActivator", "sent_codes", self.sent_codes)
                                 
+                                # Логирование
                                 password_msg = self.strings["password_success"].format(pwd)
                                 await self.log(password_msg)
                                 
-                                await asyncio.sleep(1)
+                                # Ждем ответа бота перед следующей попыткой
+                                await asyncio.sleep(self.config["password_cooldown"])
                         else:
+                            # Одиночный результат
                             await self.client.send_message(self.cryptobot_id, result)
                             
+                            # Обновление информации в базе данных
                             if check_id.startswith('CQ'):
                                 if check_id in self.sent_codes:
                                     self.sent_codes[check_id]["password_tried"] = True
                                     self.sent_codes[check_id]["password"] = result
+                                    if "attempt_count" not in self.sent_codes[check_id]:
+                                        self.sent_codes[check_id]["attempt_count"] = 1
+                                    else:
+                                        self.sent_codes[check_id]["attempt_count"] += 1
                                 else:
                                     self.sent_codes[check_id] = {
                                         "activated": True, 
                                         "time": time.time(),
                                         "password_tried": True,
-                                        "password": result
+                                        "password": result,
+                                        "attempt_count": 1,
+                                        "exhausted": False
                                     }
                                 self.db.set("SunshineChecksActivator", "sent_codes", self.sent_codes)
                             
+                            # Проверка регистра, если включено
                             if self.config["try_case_variants"] and isinstance(result, str) and len(result) > 0 and result[0].isalpha():
-                                await asyncio.sleep(1)
+                                await asyncio.sleep(self.config["password_cooldown"])
+                                
+                                # Попробуем вариант с другим регистром первой буквы
                                 if result[0].islower():
                                     variant = result[0].upper() + result[1:]
                                     await self.client.send_message(self.cryptobot_id, variant)
+                                    
+                                    # Увеличиваем счетчик попыток
+                                    if check_id in self.sent_codes:
+                                        self.sent_codes[check_id]["attempt_count"] = self.sent_codes[check_id].get("attempt_count", 1) + 1
+                                        self.db.set("SunshineChecksActivator", "sent_codes", self.sent_codes)
+                                        
                                 elif result[0].isupper():
                                     variant = result[0].lower() + result[1:]
                                     await self.client.send_message(self.cryptobot_id, variant)
+                                    
+                                    # Увеличиваем счетчик попыток
+                                    if check_id in self.sent_codes:
+                                        self.sent_codes[check_id]["attempt_count"] = self.sent_codes[check_id].get("attempt_count", 1) + 1
+                                        self.db.set("SunshineChecksActivator", "sent_codes", self.sent_codes)
                             
+                            # Логирование
                             password_msg = self.strings["password_success"].format(result)
                             await self.log(password_msg)
                 finally:
-                    self.active_password_sessions.discard(check_id)
+                    # Не удаляем check_id из active_password_sessions, чтобы избежать повторного запуска
+                    # Это будет сделано в password_feedback_handler, когда будет понятен результат
+                    pass
                         
         except Exception as e:
             error_msg = self.strings["password_error"].format(str(e))
@@ -836,6 +1017,7 @@ class SunshineChecksActivator(loader.Module):
             logger.error(f"Ошибка при обработке пароля: {e}", exc_info=True)
             if check_id:
                 self.active_password_sessions.discard(check_id)
+                self.current_check_id = None
 
     async def generate_password(self, description: str) -> str or list:
         """Генерация пароля с использованием ИИ"""
@@ -1241,6 +1423,7 @@ class SunshineChecksActivator(loader.Module):
         self.sunshine_history.clear()
         self.sent_codes.clear()
         self.active_password_sessions.clear()
+        self.current_check_id = None
         
         self.db.set("SunshineChecksActivator", "sent_codes", {})
         self.db.set("SunshineChecksActivator", "history", [])
