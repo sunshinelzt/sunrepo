@@ -1,17 +1,19 @@
 # meta developer: @sunshinelzt
 
+# Модуль для Hikka Userbot
+# Автор: Claude
+# Описание: Модуль перевода денег для lolz.live и lzt.market
+
 from telethon.tl.types import Message
 from telethon import events
 from .. import loader, utils
 import logging
 import re
 import requests
-from aiogram.types import InlineQuery, InlineQueryResultArticle, InputTextMessageContent
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 import json
 import hashlib
-from typing import Union
 import urllib.parse
+from typing import Union
 
 logger = logging.getLogger(__name__)
 
@@ -57,16 +59,6 @@ class LolzTransferMod(loader.Module):
         self.client = client
         self.db = db
         self._ratelimit = []
-        
-        # Регистрация обработчика инлайн-запросов
-        client.on(events.InlineQuery(pattern=r"lztransfer (.+)"))
-        
-        # Регистрация обработчика колбэков бота
-        self.bot = self.inline.bot
-        self.bot.add_callback_query_handler(
-            self.inline_callback_handler,
-            lambda query: query.data.startswith("lztransfer_")
-        )
     
     def get_user_id(self, username):
         """Получение ID пользователя по имени через API форума"""
@@ -143,7 +135,7 @@ class LolzTransferMod(loader.Module):
             "comment": comment
         })
         
-        return f"lztransfer_confirm_{operation_id}", f"lztransfer_cancel_{operation_id}"
+        return operation_id
     
     @loader.owner
     async def lzconfigcmd(self, message: Message):
@@ -208,26 +200,12 @@ class LolzTransferMod(loader.Module):
             return
         
         # Генерация данных для callback
-        confirm_data, cancel_data = self.generate_callback_data(
+        operation_id = self.generate_callback_data(
             user_id, amount, currency, username, comment
         )
         
-        # Создание инлайн-клавиатуры для подтверждения
-        keyboard = InlineKeyboardMarkup()
-        keyboard.add(
-            InlineKeyboardButton(
-                text=self.strings["confirm"],
-                callback_data=confirm_data
-            ),
-            InlineKeyboardButton(
-                text=self.strings["cancel"],
-                callback_data=cancel_data
-            )
-        )
-        
-        # Отправка запроса на подтверждение
-        await utils.answer(
-            status_msg,
+        # Создание инлайн-клавиатуры для подтверждения с использованием правильного формата для Hikka
+        await self.inline.form(
             self.strings["transfer_confirm"].format(
                 amount=amount,
                 currency=currency.upper(),
@@ -235,78 +213,87 @@ class LolzTransferMod(loader.Module):
                 profile_url=profile_url,
                 comment=comment
             ),
-            reply_markup=keyboard
+            message=message,
+            reply_markup=[
+                [
+                    {
+                        "text": self.strings["confirm"],
+                        "callback": self.confirm_transfer,
+                        "args": (operation_id,)
+                    },
+                    {
+                        "text": self.strings["cancel"],
+                        "callback": self.cancel_transfer,
+                        "args": (operation_id,)
+                    }
+                ]
+            ],
+            ttl=600,  # Время жизни формы - 10 минут
+            disable_security=False  # Включаем проверку безопасности
         )
     
-    async def inline_callback_handler(self, query: CallbackQuery):
-        """Обработчик колбэков инлайн-клавиатуры"""
-        data = query.data
+    async def confirm_transfer(self, call, operation_id):
+        """Обработчик подтверждения перевода"""
+        # Получение данных операции
+        operation_data = self.db.get(self.name, f"op_{operation_id}")
         
-        if data.startswith("lztransfer_cancel_"):
-            operation_id = data.split("_", 2)[2]
-            
-            # Удаляем данные операции
-            self.db.set(self.name, f"op_{operation_id}", None)
-            
-            await self.bot.edit_message_text(
-                self.strings["operation_cancelled"],
-                inline_message_id=query.inline_message_id,
-                parse_mode="HTML"
+        if not operation_data:
+            await call.edit(
+                "❌ <b>Данные операции устарели или были удалены.</b>",
+                reply_markup=[]
             )
             return
         
-        if data.startswith("lztransfer_confirm_"):
-            operation_id = data.split("_", 2)[2]
-            
-            # Получение данных операции
-            operation_data = self.db.get(self.name, f"op_{operation_id}")
-            
-            if not operation_data:
-                await self.bot.edit_message_text(
-                    "❌ <b>Данные операции устарели или были удалены.</b>",
-                    inline_message_id=query.inline_message_id,
-                    parse_mode="HTML"
-                )
-                return
-            
-            user_id = operation_data["user_id"]
-            amount = operation_data["amount"]
-            currency = operation_data["currency"]
-            username = operation_data["username"]
-            comment = operation_data["comment"]
-            
-            # Перевод денег
-            success, error = await self.transfer_money(
-                user_id, 
-                amount, 
-                currency, 
-                comment, 
-                self.config["SECRET_PHRASE"]
+        user_id = operation_data["user_id"]
+        amount = operation_data["amount"]
+        currency = operation_data["currency"]
+        username = operation_data["username"]
+        comment = operation_data["comment"]
+        
+        # Перевод денег
+        success, error = await self.transfer_money(
+            user_id, 
+            amount, 
+            currency, 
+            comment, 
+            self.config["SECRET_PHRASE"]
+        )
+        
+        # Удаляем данные операции
+        self.db.set(self.name, f"op_{operation_id}", None)
+        
+        if success:
+            await call.edit(
+                self.strings["transfer_success"].format(
+                    amount=amount,
+                    currency=currency.upper(),
+                    username=username
+                ),
+                reply_markup=[]
             )
-            
-            # Удаляем данные операции
-            self.db.set(self.name, f"op_{operation_id}", None)
-            
-            if success:
-                await self.bot.edit_message_text(
-                    self.strings["transfer_success"].format(
-                        amount=amount,
-                        currency=currency.upper(),
-                        username=username
-                    ),
-                    inline_message_id=query.inline_message_id,
-                    parse_mode="HTML"
-                )
-            else:
-                await self.bot.edit_message_text(
-                    self.strings["transfer_error"].format(error=error),
-                    inline_message_id=query.inline_message_id,
-                    parse_mode="HTML"
-                )
+        else:
+            await call.edit(
+                self.strings["transfer_error"].format(error=error),
+                reply_markup=[]
+            )
     
-    async def lztransfer_inline_handler(self, query: InlineQuery):
-        """Обработчик инлайн-запросов"""
-        query_text = query.query.strip()
+    async def cancel_transfer(self, call, operation_id):
+        """Обработчик отмены перевода"""
+        # Удаляем данные операции
+        self.db.set(self.name, f"op_{operation_id}", None)
+        
+        await call.edit(
+            self.strings["operation_cancelled"],
+            reply_markup=[]
+        )
+    
+    # Инлайн-обработчик для Hikka
+    async def lztransfer_inline_handler(self, query):
+        """Инлайн обработчик для перевода средств"""
+        query_text = query.args
+        
+        if not query_text:
+            return
         
         # Разбиваем с учетом кавычек для поддержки имен с пробелами
         args = []
@@ -329,61 +316,77 @@ class LolzTransferMod(loader.Module):
         if current_arg:
             args.append(current_arg)
         
-        if len(args) < 3:
+        if len(args) < 2:
             return
         
-        command, username, amount_str = args[:3]
-        
-        if command != "lztransfer":
-            return
+        username, amount_str = args[:2]
         
         try:
             amount = float(amount_str)
         except ValueError:
             return
         
-        currency = args[3] if len(args) > 3 else self.config["DEFAULT_CURRENCY"]
-        comment = " ".join(args[4:]) if len(args) > 4 else f"Перевод для {username}"
+        currency = args[2] if len(args) > 2 else self.config["DEFAULT_CURRENCY"]
+        comment = " ".join(args[3:]) if len(args) > 3 else f"Перевод для {username}"
+        
+        # Проверяем наличие API ключа
+        if not self.config["API_KEY"] or not self.config["SECRET_PHRASE"]:
+            return [
+                {
+                    "title": "⚠️ Не настроен API ключ или секретная фраза",
+                    "description": "Используйте .lzconfig для настройки",
+                    "message": "⚠️ <b>Для использования модуля необходимо настроить API ключ и секретную фразу</b>\n\nИспользуйте команду <code>.lzconfig API_KEY SECRET_PHRASE</code>",
+                    "thumb": "https://img.icons8.com/color/48/000000/error--v1.png"
+                }
+            ]
         
         # Получение ID пользователя
         user_id, profile_url = self.get_user_id(username)
         
         if not user_id:
-            return
+            return [
+                {
+                    "title": "⚠️ Пользователь не найден",
+                    "description": f"Пользователь {username} не найден на форуме",
+                    "message": self.strings["user_not_found"],
+                    "thumb": "https://img.icons8.com/color/48/000000/error--v1.png"
+                }
+            ]
         
         # Генерация данных для callback
-        confirm_data, cancel_data = self.generate_callback_data(
+        operation_id = self.generate_callback_data(
             user_id, amount, currency, username, comment
         )
         
-        # Создание инлайн-результата
-        result = InlineQueryResultArticle(
-            id=hashlib.md5(f"{username}_{amount}_{currency}".encode()).hexdigest(),
-            title=f"Перевести {amount} {currency.upper()} пользователю {username}",
-            description=f"Комментарий: {comment}",
-            input_message_content=InputTextMessageContent(
-                self.strings["transfer_confirm"].format(
+        # Используем формат инлайн-форм для Hikka
+        return [
+            {
+                "title": f"💸 Перевести {amount} {currency.upper()} пользователю {username}",
+                "description": f"Комментарий: {comment}",
+                "message": self.strings["transfer_confirm"].format(
                     amount=amount,
                     currency=currency.upper(),
                     username=username,
                     profile_url=profile_url,
                     comment=comment
                 ),
-                parse_mode="HTML"
-            ),
-            reply_markup=InlineKeyboardMarkup().add(
-                InlineKeyboardButton(
-                    text=self.strings["confirm"],
-                    callback_data=confirm_data
-                ),
-                InlineKeyboardButton(
-                    text=self.strings["cancel"],
-                    callback_data=cancel_data
-                )
-            )
-        )
-        
-        await query.answer([result], cache_time=0)
+                "thumb": "https://img.icons8.com/fluency/48/000000/money-transfer.png",
+                "reply_markup": [
+                    [
+                        {
+                            "text": self.strings["confirm"],
+                            "callback": self.confirm_transfer,
+                            "args": (operation_id,)
+                        },
+                        {
+                            "text": self.strings["cancel"],
+                            "callback": self.cancel_transfer,
+                            "args": (operation_id,)
+                        }
+                    ]
+                ]
+            }
+        ]
     
     async def helpcmd(self, message: Message):
         """Показать справку по модулю"""
