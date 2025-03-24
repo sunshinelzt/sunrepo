@@ -1,5 +1,4 @@
 # meta developer: @sunshinelzt
-# переработано для оптимальной работы с API zelenka.guru/lolz.live
 
 from telethon.tl.types import Message
 from telethon import events
@@ -10,52 +9,73 @@ import json
 import hashlib
 import urllib.parse
 import asyncio
+import base64
 from typing import Union, Tuple, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
 @loader.tds
-class LolzTransferMod(loader.Module):
-    """Модуль для перевода денег на форуме lolz.live/zelenka.guru"""
+class EnhancedLolzTransferMod(loader.Module):
+    """🔐 Улучшенный модуль для перевода денег на lolz.live/zelenka.guru с защитой API-ключа"""
     
     strings = {
-        "name": "LolzTransfer",
-        "no_api": "⚠️ <b>API ключ не установлен. Используйте .lzconfig</b>",
-        "no_secret": "⚠️ <b>Секретная фраза не установлена. Используйте .lzconfig</b>",
+        "name": "EnhancedLolzTransfer",
+        "no_api": "⚠️ <b>API ключ не установлен. Используйте </b><code>.lzconfig</code>",
+        "no_secret": "⚠️ <b>Секретная фраза не установлена. Используйте </b><code>.lzconfig</code>",
         "config_saved": "✅ <b>Конфигурация успешно сохранена!</b>",
         "invalid_amount": "⚠️ <b>Неверная сумма. Пожалуйста, введите корректное число.</b>",
         "user_not_found": "⚠️ <b>Пользователь не найден на форуме.</b>",
-        "transfer_success": "✅ <b>Успешно переведено {amount} {currency} пользователю {username}!</b>",
-        "transfer_error": "❌ <b>Ошибка при переводе средств: {error}</b>",
-        "transfer_confirm": "💸 <b>Вы собираетесь перевести {amount} {currency} пользователю <a href='{profile_url}'>{username}</a>.</b>\n\n<b>Комментарий:</b> {comment}",
+        "transfer_success": "✅ <b>Успешно переведено <code>{amount} {currency}</code> пользователю </b><a href='{profile_url}'>{username}</a>",
+        "transfer_error": "❌ <b>Ошибка при переводе средств:</b> <code>{error}</code>",
+        "transfer_confirm": "💸 <b>Перевод средств</b>\n\n<b>Получатель:</b> <a href='{profile_url}'>{username}</a>\n<b>Сумма:</b> <code>{amount} {currency}</code>\n<b>Комментарий:</b> <i>{comment}</i>",
         "confirm": "✅ Подтвердить",
         "cancel": "❌ Отменить",
         "operation_cancelled": "❌ <b>Операция отменена.</b>",
-        "checking_user": "🔍 <b>Проверка пользователя {username}...</b>",
-        "api_error": "❌ <b>Ошибка API: {error}</b>",
-        "balance_info": "💰 <b>Ваш баланс:</b>\n{balance_info}",
+        "checking_user": "🔍 <b>Поиск пользователя</b> <code>{username}</code><b>...</b>",
+        "api_error": "❌ <b>Ошибка API:</b> <code>{error}</code>",
+        "balance_info": "💰 <b>Ваш баланс:</b>\n\n{balance_info}",
+        "decryption_failed": "⚠️ <b>Ошибка расшифровки API ключа. Проверьте корректность данных.</b>",
+        "processing_transfer": "⏳ <b>Выполняется перевод</b> <code>{amount} {currency}</code> <b>пользователю</b> <code>{username}</code><b>...</b>",
         "help_text": (
-            "<b>🔹 Помощь по модулю LolzTransfer:</b>\n\n"
-            "<code>.lzconfig [API_KEY] [SECRET_PHRASE]</code> - Настроить API ключ и секретную фразу\n"
-            "<code>.lztransfer [username] [сумма] [валюта] [комментарий]</code> - Перевести деньги\n"
-            "<code>.lzbalance</code> - Проверить баланс\n"
-            "<code>.lzhistory [количество]</code> - История операций\n\n"
-            "<b>Параметры:</b>\n"
-            "<code>валюта</code> - Необязательно, по умолчанию 'rub'\n"
-            "<code>комментарий</code> - Необязательно\n"
-            "<code>количество</code> - Необязательно, количество записей (макс. 50)"
+            "<b>🔹 EnhancedLolzTransfer 🔹</b>\n\n"
+            "<b>📌 Команды:</b>\n"
+            "  • <code>.lzconfig [ENCODED_API_KEY] [SECRET_PHRASE]</code>\n"
+            "     <i>Настройка API ключа (в base64) и секретной фразы</i>\n\n"
+            "  • <code>.lztransfer [username] [сумма] [валюта] [комментарий]</code>\n"
+            "     <i>Перевод средств на указанный аккаунт</i>\n\n"
+            "  • <code>.lzbalance</code>\n"
+            "     <i>Проверка баланса</i>\n\n"
+            "  • <code>.lzhistory [число_записей]</code>\n"
+            "     <i>История операций (макс. 50)</i>\n\n"
+            "<b>💡 Примечание:</b> API ключ должен быть зашифрован в формате base64"
+        ),
+        "history_title": "📜 <b>История операций:</b>",
+        "history_empty": "📭 <b>История операций пуста</b>",
+        "getting_history": "🔄 <b>Получение истории операций...</b>",
+        "getting_balance": "🔄 <b>Получение информации о балансе...</b>",
+        "history_item": "{icon} <b>{amount} {currency}</b> • <i>{description}</i>",
+        "balance_empty": "• <i>На балансе нет средств</i>",
+        "auth_success": "✅ <b>Авторизация успешна! Аккаунт:</b> <code>{username}</code>",
+        "config_guide": (
+            "<b>🔧 Настройка EnhancedLolzTransfer</b>\n\n"
+            "<code>.lzconfig [ENCODED_API_KEY] [SECRET_PHRASE]</code>\n\n"
+            "<b>Где:</b>\n"
+            "• <code>ENCODED_API_KEY</code> — API ключ в формате base64\n"
+            "• <code>SECRET_PHRASE</code> — Секретная фраза\n\n"
+            "<i>API ключ можно получить в настройках профиля на lolz.live/zelenka.guru</i>"
         )
     }
 
     def __init__(self):
         self.config = loader.ModuleConfig(
-            "API_KEY", "", "API Ключ Lolz.Market/Zelenka.Guru",
+            "API_KEY_ENCODED", "", "API Ключ Lolz Market/Zelenka.Guru в формате base64",
             "SECRET_PHRASE", "", "Секретная фраза для подтверждения переводов",
             "DEFAULT_CURRENCY", "rub", "Валюта по умолчанию (rub, usd и т.д.)",
             "DEFAULT_HOLD", 0, "Срок холда по умолчанию (0 для отсутствия холда)",
             "DEFAULT_HOLD_OPTION", "day", "Опция холда по умолчанию (day, month)",
             "API_URL_FORUM", "https://api.lolz.live", "URL API форума",
             "API_URL_MARKET", "https://api.lzt.market", "URL API маркета",
+            "UI_THEME", "modern", "Тема интерфейса (modern, classic, dark)"
         )
         self.name = self.strings["name"]
 
@@ -65,8 +85,25 @@ class LolzTransferMod(loader.Module):
         self.db = db
         self._cache = {}
         self._semaphore = asyncio.Semaphore(3)  # Ограничение параллельных запросов
+    
+    def _decode_api_key(self) -> Optional[str]:
+        """
+        Расшифровка API ключа из base64
         
-    async def _make_request(self, method: str, url: str, headers: Dict[str, str], 
+        Returns:
+            Optional[str]: Расшифрованный API ключ или None в случае ошибки
+        """
+        if not self.config["API_KEY_ENCODED"]:
+            return None
+            
+        try:
+            # Декодируем base64
+            return base64.b64decode(self.config["API_KEY_ENCODED"]).decode('utf-8')
+        except Exception as e:
+            logger.error(f"Ошибка расшифровки API ключа: {e}")
+            return None
+        
+    async def _make_request(self, method: str, url: str, headers: Dict[str, str] = None, 
                             params: Optional[Dict[str, Any]] = None, 
                             json_data: Optional[Dict[str, Any]] = None) -> Tuple[bool, Union[Dict[str, Any], str]]:
         """
@@ -82,6 +119,13 @@ class LolzTransferMod(loader.Module):
         Returns:
             Tuple[bool, Union[Dict[str, Any], str]]: (успех, данные/сообщение об ошибке)
         """
+        # Получаем расшифрованный API ключ, если в заголовках есть Authorization
+        if headers and "Authorization" in headers and "Bearer" in headers["Authorization"]:
+            api_key = self._decode_api_key()
+            if not api_key:
+                return False, self.strings["decryption_failed"]
+            headers["Authorization"] = f"Bearer {api_key}"
+        
         async with self._semaphore:
             try:
                 if method.upper() == "GET":
@@ -120,7 +164,7 @@ class LolzTransferMod(loader.Module):
         Returns:
             Tuple[Optional[int], Optional[str], Optional[str]]: (ID пользователя, URL профиля, имя пользователя)
         """
-        if not self.config["API_KEY"]:
+        if not self.config["API_KEY_ENCODED"]:
             return None, None, None
             
         # Кэширование результатов для оптимизации
@@ -128,7 +172,7 @@ class LolzTransferMod(loader.Module):
         if cache_key in self._cache:
             return self._cache[cache_key]
             
-        headers = {"Authorization": f"Bearer {self.config['API_KEY']}"}
+        headers = {"Authorization": "Bearer PLACEHOLDER"}  # Реальный ключ будет подставлен в _make_request
         
         # Метод 1: Прямой поиск по API find
         encoded_username = urllib.parse.quote(username)
@@ -189,22 +233,34 @@ class LolzTransferMod(loader.Module):
         
     async def get_balance(self) -> Tuple[bool, Union[Dict[str, Any], str]]:
         """Получение баланса пользователя"""
-        if not self.config["API_KEY"]:
+        if not self.config["API_KEY_ENCODED"]:
             return False, self.strings["no_api"]
             
-        headers = {"Authorization": f"Bearer {self.config['API_KEY']}"}
+        headers = {"Authorization": "Bearer PLACEHOLDER"}  # Реальный ключ будет подставлен в _make_request
         return await self._make_request(
             "GET",
             f"{self.config['API_URL_MARKET']}/balance",
             headers
         )
         
-    async def get_history(self, limit: int = 10) -> Tuple[bool, Union[Dict[str, Any], str]]:
-        """Получение истории операций"""
-        if not self.config["API_KEY"]:
+    async def get_user_info(self) -> Tuple[bool, Union[Dict[str, Any], str]]:
+        """Получение информации о текущем пользователе"""
+        if not self.config["API_KEY_ENCODED"]:
             return False, self.strings["no_api"]
             
-        headers = {"Authorization": f"Bearer {self.config['API_KEY']}"}
+        headers = {"Authorization": "Bearer PLACEHOLDER"}  # Реальный ключ будет подставлен в _make_request
+        return await self._make_request(
+            "GET",
+            f"{self.config['API_URL_FORUM']}/users/me",
+            headers
+        )
+        
+    async def get_history(self, limit: int = 10) -> Tuple[bool, Union[Dict[str, Any], str]]:
+        """Получение истории операций"""
+        if not self.config["API_KEY_ENCODED"]:
+            return False, self.strings["no_api"]
+            
+        headers = {"Authorization": "Bearer PLACEHOLDER"}  # Реальный ключ будет подставлен в _make_request
         return await self._make_request(
             "GET",
             f"{self.config['API_URL_MARKET']}/balance/history",
@@ -227,10 +283,10 @@ class LolzTransferMod(loader.Module):
         Returns:
             Tuple[bool, Optional[str]]: (успех, сообщение об ошибке)
         """
-        if not self.config["API_KEY"]:
+        if not self.config["API_KEY_ENCODED"]:
             return False, self.strings["no_api"]
             
-        headers = {"Authorization": f"Bearer {self.config['API_KEY']}"}
+        headers = {"Authorization": "Bearer PLACEHOLDER"}  # Реальный ключ будет подставлен в _make_request
         payload = {
             "amount": float(amount),
             "currency": currency.lower(),
@@ -290,39 +346,46 @@ class LolzTransferMod(loader.Module):
         args = utils.get_args_raw(message).split(maxsplit=1)
         
         if len(args) < 2:
-            await utils.answer(
-                message,
-                "<b>🔧 Настройка LolzTransfer</b>\n\n"
-                "<code>.lzconfig [API_KEY] [SECRET_PHRASE]</code>\n\n"
-                "Получить API ключ можно в настройках профиля на lolz.live/zelenka.guru"
-            )
+            await utils.answer(message, self.strings["config_guide"])
             return
         
-        api_key, secret_phrase = args
+        api_key_encoded, secret_phrase = args
         
-        self.config["API_KEY"] = api_key.strip()
+        # Проверяем валидность API ключа (пробуем расшифровать)
+        try:
+            base64.b64decode(api_key_encoded).decode('utf-8')
+        except Exception:
+            await utils.answer(message, self.strings["decryption_failed"])
+            return
+        
+        # Сохраняем данные в конфиг
+        self.config["API_KEY_ENCODED"] = api_key_encoded.strip()
         self.config["SECRET_PHRASE"] = secret_phrase.strip()
         
-        # Проверяем валидность API ключа
-        success, data = await self.get_balance()
+        # Проверяем авторизацию
+        success, data = await self.get_user_info()
         
-        if success:
+        if success and data.get("username"):
             # Очищаем кэш при изменении API ключа
             self._cache = {}
-            await utils.answer(message, self.strings["config_saved"])
+            await utils.answer(
+                message, 
+                self.strings["auth_success"].format(username=data.get("username")) + "\n\n" + self.strings["config_saved"]
+            )
         else:
-            self.config["API_KEY"] = ""
+            self.config["API_KEY_ENCODED"] = ""
             self.config["SECRET_PHRASE"] = ""
-            await utils.answer(message, f"❌ <b>Ошибка настройки:</b> {data}")
+            error_message = data if isinstance(data, str) else "Неизвестная ошибка"
+            await utils.answer(message, f"❌ <b>Ошибка авторизации:</b> {error_message}")
     
     @loader.owner
     async def lzbalancecmd(self, message: Message):
         """Проверить баланс"""
-        if not self.config["API_KEY"]:
+        if not self.config["API_KEY_ENCODED"]:
             await utils.answer(message, self.strings["no_api"])
             return
             
-        status_msg = await utils.answer(message, "🔄 <b>Получение информации о балансе...</b>")
+        status_msg = await utils.answer(message, self.strings["getting_balance"])
         
         success, data = await self.get_balance()
         
@@ -330,10 +393,10 @@ class LolzTransferMod(loader.Module):
             balance_text = ""
             for currency, amount in data.items():
                 if isinstance(amount, (int, float)) and amount > 0:
-                    balance_text += f"• <b>{currency.upper()}</b>: {amount}\n"
+                    balance_text += f"• <b>{currency.upper()}</b>: <code>{amount}</code>\n"
             
             if not balance_text:
-                balance_text = "• На балансе нет средств"
+                balance_text = self.strings["balance_empty"]
                 
             await utils.answer(status_msg, self.strings["balance_info"].format(balance_info=balance_text))
         else:
@@ -342,7 +405,7 @@ class LolzTransferMod(loader.Module):
     @loader.owner
     async def lzhistorycmd(self, message: Message):
         """История операций"""
-        if not self.config["API_KEY"]:
+        if not self.config["API_KEY_ENCODED"]:
             await utils.answer(message, self.strings["no_api"])
             return
             
@@ -352,16 +415,16 @@ class LolzTransferMod(loader.Module):
         except ValueError:
             limit = 10
             
-        status_msg = await utils.answer(message, "🔄 <b>Получение истории операций...</b>")
+        status_msg = await utils.answer(message, self.strings["getting_history"])
         
         success, data = await self.get_history(limit)
         
         if success:
             if not data:
-                await utils.answer(status_msg, "📜 <b>История операций пуста</b>")
+                await utils.answer(status_msg, self.strings["history_empty"])
                 return
                 
-            history_text = "<b>📜 История операций:</b>\n\n"
+            history_text = f"{self.strings['history_title']}\n\n"
             
             for item in data:
                 operation_type = item.get("type", "unknown")
@@ -377,7 +440,12 @@ class LolzTransferMod(loader.Module):
                 else:
                     icon = "🔄"
                     
-                history_text += f"{icon} <b>{amount} {currency}</b>: {description}\n"
+                history_text += self.strings["history_item"].format(
+                    icon=icon,
+                    amount=amount,
+                    currency=currency,
+                    description=description
+                ) + "\n"
                 
             await utils.answer(status_msg, history_text)
         else:
@@ -386,7 +454,7 @@ class LolzTransferMod(loader.Module):
     @loader.owner
     async def lztransfercmd(self, message: Message):
         """Перевести деньги пользователю"""
-        if not self.config["API_KEY"]:
+        if not self.config["API_KEY_ENCODED"]:
             await utils.answer(message, self.strings["no_api"])
             return
         
@@ -509,9 +577,16 @@ class LolzTransferMod(loader.Module):
         
         # Обновление сообщения
         await call.edit(
-            f"🔄 <b>Выполняется перевод {amount} {currency.upper()} пользователю {username}...</b>",
+            self.strings["processing_transfer"].format(
+                amount=amount,
+                currency=currency.upper(),
+                username=username
+            ),
             reply_markup=[]
         )
+        
+        # Получаем URL профиля
+        profile_url = f"https://lolz.live/members/{user_id}"
         
         # Перевод денег
         success, error = await self.transfer_money(
@@ -530,7 +605,8 @@ class LolzTransferMod(loader.Module):
                 self.strings["transfer_success"].format(
                     amount=amount,
                     currency=currency.upper(),
-                    username=username
+                    username=username,
+                    profile_url=profile_url
                 )
             )
         else:
@@ -544,8 +620,14 @@ class LolzTransferMod(loader.Module):
         self.db.set(self.name, f"op_{operation_id}", None)
         
         await call.edit(
-            self.strings["operation_cancelled"]
+            self.strings["operation_cancelled"],
+            reply_markup=[]
         )
+    
+    @loader.command
+    async def lzhelp(self, message: Message):
+        """Помощь по модулю"""
+        await utils.answer(message, self.strings["help_text"])
     
     # Инлайн-обработчик для Hikka
     async def lztransfer_inline_handler(self, query):
@@ -590,7 +672,7 @@ class LolzTransferMod(loader.Module):
         comment = " ".join(args[3:]) if len(args) > 3 else f"Перевод для {username}"
         
         # Проверяем наличие API ключа
-        if not self.config["API_KEY"] or not self.config["SECRET_PHRASE"]:
+        if not self.config["API_KEY_ENCODED"] or not self.config["SECRET_PHRASE"]:
             return [
                 {
                     "title": "⚠️ Не настроен API ключ или секретная фраза",
@@ -650,7 +732,3 @@ class LolzTransferMod(loader.Module):
                 ]
             }
         ]
-    
-    async def helplolzcmd(self, message: Message):
-        """Показать справку по модулю"""
-        await utils.answer(message, self.strings["help_text"])
