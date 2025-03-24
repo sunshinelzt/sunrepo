@@ -4,386 +4,210 @@ from telethon.tl.types import Message
 from telethon import events
 from .. import loader, utils
 import logging
-import re
-import requests
-import json
 import hashlib
 import urllib.parse
-from typing import Union
+import requests
+from typing import Dict, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+class LolzTransferUltimate(loader.Module):
+    """Продвинутый модуль финансовых операций для Lolz.market"""
 
-@loader.tds
-class LolzTransferMod(loader.Module):
-    """Модуль перевода денег для форума lolz.live и lzt.market"""
-    
     strings = {
-        "name": "LolzTransfer",
-        "no_api": "⚠️ <b>API ключ не установлен. Используйте .lzconfig</b>",
-        "no_secret": "⚠️ <b>Секретная фраза не установлена. Используйте .lzconfig</b>",
-        "config_saved": "✅ <b>Конфигурация успешно сохранена!</b>",
-        "invalid_amount": "⚠️ <b>Неверная сумма. Пожалуйста, введите корректное число.</b>",
-        "user_not_found": "⚠️ <b>Пользователь не найден на форуме.</b>",
-        "transfer_success": "✅ <b>Успешно переведено {amount} {currency} пользователю {username}!</b>",
-        "transfer_error": "❌ <b>Ошибка при переводе средств: {error}</b>",
-        "transfer_confirm": "💸 <b>Вы собираетесь перевести {amount} {currency} пользователю <a href='{profile_url}'>{username}</a>.</b>\n\n<b>Комментарий:</b> {comment}",
-        "confirm": "✅ Подтвердить",
-        "cancel": "❌ Отменить",
-        "operation_cancelled": "❌ <b>Операция отменена.</b>",
-        "checking_user": "🔍 <b>Проверка пользователя {username}...</b>",
-        "help_text": (
-            "<b>🔹 Помощь по модулю LolzTransfer:</b>\n\n"
-            "<code>.lzconfig</code> - Настроить API ключ и секретную фразу\n"
-            "<code>.lztransfer [username] [сумма] [валюта] [комментарий]</code> - Перевести деньги\n"
-            "<code>валюта</code> - Необязательно, по умолчанию 'rub'\n"
-            "<code>комментарий</code> - Необязательно, комментарий к платежу"
+        "name": "💰 LolzTransfer",
+        "config_help": "🔧 Настройка API: .lzconfig API_KEY SECRET_PHRASE",
+        "transfer_usage": "💸 Перевод: .lztransfer username amount [currency] [comment]",
+        "api_error": "🚫 Ошибка API: Проверьте настройки",
+        "user_not_found": "❌ Пользователь {username} не найден",
+        "transfer_success": "✅ Переведено {amount} {currency} пользователю {username}",
+        "transfer_error": "❌ Ошибка перевода: {error}",
+        "balance_info": "💳 Баланс: {balance} {currency}\n🔓 Доступно: {available} {currency}",
+        "history_title": "📜 История транзакций",
+        "help_menu": (
+            "🌟 <b>LolzTransfer - Меню помощи</b>\n\n"
+            "🔹 Основные команды:\n"
+            "• <code>.lzconfig</code> - Настройка API\n"
+            "• <code>.lzbalance</code> - Проверка баланса\n"
+            "• <code>.lztransfer</code> - Перевод средств\n"
+            "• <code>.lzhistory</code> - История операций"
         )
     }
 
     def __init__(self):
         self.config = loader.ModuleConfig(
-            "API_KEY", "", "API Ключ Lolz.Market",
-            "SECRET_PHRASE", "", "Секретная фраза для подтверждения переводов",
-            "DEFAULT_CURRENCY", "rub", "Валюта по умолчанию (rub, usd и т.д.)",
-            "DEFAULT_HOLD", 0, "Срок холда по умолчанию (0 для отсутствия холда)",
-            "DEFAULT_HOLD_OPTION", "day", "Опция холда по умолчанию (day, month)",
+            "API_KEY", "", "API ключ Lolz.Market",
+            "SECRET_PHRASE", "", "Секретная фраза",
+            "DEFAULT_CURRENCY", "rub", "Валюта по умолчанию",
+            "TRANSFER_TIMEOUT", 30, "Таймаут операций (сек)",
+            "MAX_TRANSFER_AMOUNT", 50000, "Максимальная сумма перевода"
         )
-        self.name = self.strings["name"]
+        self._cache = {}
+        self._transfer_locks = {}
 
-    async def client_ready(self, client, db):
-        """Вызывается, когда клиент готов."""
-        self.client = client
-        self.db = db
-        self._ratelimit = []
-    
-    def get_user_id(self, username):
-        """Получение ID пользователя по имени через API форума"""
+    def _generate_secure_id(self, data: str) -> str:
+        """Генерация безопасного уникального идентификатора"""
+        return hashlib.sha256(
+            f"{data}_{hashlib.md5(str(self.config['API_KEY']).encode()).hexdigest()}"
+            .encode()
+        ).hexdigest()[:16]
+
+    def _validate_transfer_params(self, amount: float, username: str) -> Tuple[bool, Optional[str]]:
+        """Расширенная валидация параметров перевода"""
+        if not username or len(username) < 2:
+            return False, "Некорректное имя пользователя"
+        
         try:
-            # URL-кодирование имени пользователя для поддержки русских ников
-            encoded_username = urllib.parse.quote(username)
+            amount = float(amount)
+            if amount <= 0:
+                return False, "Сумма должна быть положительной"
             
-            # Поиск пользователя на форуме
-            url = f"https://api.lolz.live/users/find?username={encoded_username}"
-            headers = {"Authorization": f"Bearer {self.config['API_KEY']}"}
-            response = requests.get(url, headers=headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("user_id"):
-                    return data["user_id"], f"https://lolz.live/members/{data['user_id']}"
-            
-            # Если первый метод не сработал, попробуем найти по точному совпадению
-            url = "https://api.lolz.live/users/search"
-            params = {"username": username}
-            response = requests.get(url, headers=headers, params=params)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if isinstance(data, list) and len(data) > 0:
-                    for user in data:
-                        if user.get("username").lower() == username.lower():
-                            return user["user_id"], f"https://lolz.live/members/{user['user_id']}"
-            
-            return None, None
-        except Exception as e:
-            logger.error(f"Ошибка получения ID пользователя: {e}")
-            return None, None
-    
-    async def transfer_money(self, user_id, amount, currency, comment, secret_answer):
-        """Перевод денег через API lzt.market"""
+            if amount > self.config["MAX_TRANSFER_AMOUNT"]:
+                return False, f"Превышен лимит перевода {self.config['MAX_TRANSFER_AMOUNT']}"
+        except ValueError:
+            return False, "Неверный формат суммы"
+        
+        return True, None
+
+    def _api_request(self, method: str, endpoint: str, data: Dict = None) -> Dict:
+        """Универсальный метод API-запросов с расширенной обработкой"""
+        base_url = "https://api.lzt.market"
+        url = f"{base_url}/{endpoint}"
+        
+        headers = {
+            "Authorization": f"Bearer {self.config['API_KEY']}",
+            "Content-Type": "application/json",
+            "User-Agent": "LolzTransfer/1.0"
+        }
+        
         try:
-            url = "https://api.lzt.market/balance/transfer"
-            headers = {"Authorization": f"Bearer {self.config['API_KEY']}"}
-            
-            payload = {
-                "amount": float(amount),
-                "currency": currency,
-                "secret_answer": secret_answer,
-                "user_id": int(user_id),
-                "comment": comment,
-                "hold": self.config["DEFAULT_HOLD"],
-                "hold_option": self.config["DEFAULT_HOLD_OPTION"]
-            }
-            
-            response = requests.post(url, headers=headers, json=payload)
-            
-            if response.status_code == 200:
-                return True, None
+            if method.lower() == 'get':
+                response = requests.get(url, headers=headers, params=data, timeout=self.config["TRANSFER_TIMEOUT"])
             else:
-                error_data = response.json()
-                return False, error_data.get("message", "Неизвестная ошибка")
+                response = requests.post(url, headers=headers, json=data, timeout=self.config["TRANSFER_TIMEOUT"])
+            
+            response.raise_for_status()
+            return response.json()
+        
+        except requests.RequestException as e:
+            logging.error(f"API Error: {e}")
+            return {"error": str(e)}
+
+    def _find_user(self, username: str) -> Optional[Dict]:
+        """Улучшенный поиск пользователя с кэшированием"""
+        cache_key = self._generate_secure_id(username)
+        
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+        
+        encoded_username = urllib.parse.quote(username)
+        
+        # Основной и резервный методы поиска
+        search_methods = [
+            f"users/find?username={encoded_username}",
+            "users/search"
+        ]
+        
+        for method in search_methods:
+            result = self._api_request('get', method, {"username": username})
+            
+            if result and (result.get("user_id") or len(result) > 0):
+                user_data = result[0] if isinstance(result, list) else result
+                user_info = {
+                    "user_id": user_data.get("user_id"),
+                    "username": user_data.get("username"),
+                    "profile_url": f"https://lolz.live/members/{user_data.get('user_id')}"
+                }
                 
-        except Exception as e:
-            logger.error(f"Ошибка перевода: {e}")
-            return False, str(e)
-    
-    def generate_callback_data(self, user_id, amount, currency, username, comment):
-        """Генерация безопасных данных для callback"""
-        # Создаем уникальный идентификатор для операции
-        operation_id = hashlib.md5(f"{user_id}_{amount}_{currency}_{username}_{comment}".encode()).hexdigest()[:10]
+                # Кэширование результата
+                self._cache[cache_key] = user_info
+                return user_info
         
-        # Сохраняем данные в базу
-        self.db.set(self.name, f"op_{operation_id}", {
-            "user_id": user_id,
-            "amount": amount,
+        return None
+
+    def _create_transfer_payload(self, user_id: int, amount: float, currency: str, comment: str) -> Dict:
+        """Подготовка payload для перевода"""
+        return {
+            "amount": float(amount),
             "currency": currency,
-            "username": username,
-            "comment": comment
-        })
-        
-        return operation_id
-    
-    @loader.owner
-    async def lzconfigcmd(self, message: Message):
-        """Настроить API ключ и секретную фразу"""
-        args = utils.get_args_raw(message).split(maxsplit=1)
-        
-        if len(args) < 2:
-            await utils.answer(
-                message,
-                "<b>🔧 Настройка LolzTransfer</b>\n\n"
-                "<code>.lzconfig [API_KEY] [SECRET_PHRASE]</code>"
-            )
-            return
-        
-        api_key, secret_phrase = args
-        
-        self.config["API_KEY"] = api_key.strip()
-        self.config["SECRET_PHRASE"] = secret_phrase.strip()
-        
-        await utils.answer(message, self.strings["config_saved"])
-    
+            "user_id": int(user_id),
+            "comment": comment,
+            "secret_answer": self.config["SECRET_PHRASE"]
+        }
+
     @loader.owner
     async def lztransfercmd(self, message: Message):
-        """Перевести деньги пользователю на lolz.live"""
-        if not self.config["API_KEY"]:
-            await utils.answer(message, self.strings["no_api"])
-            return
-        
-        if not self.config["SECRET_PHRASE"]:
-            await utils.answer(message, self.strings["no_secret"])
-            return
-        
+        """Продвинутый перевод средств"""
         args = utils.get_args_raw(message).split(maxsplit=3)
         
         if len(args) < 2:
-            await utils.answer(message, self.strings["help_text"])
+            await utils.answer(message, self.strings["transfer_usage"])
             return
         
-        # Парсинг аргументов
-        username = args[0]
-        
-        try:
-            amount = float(args[1])
-        except ValueError:
-            await utils.answer(message, self.strings["invalid_amount"])
-            return
-        
+        username, amount = args[:2]
         currency = args[2] if len(args) > 2 else self.config["DEFAULT_CURRENCY"]
         comment = args[3] if len(args) > 3 else f"Перевод для {username}"
         
-        # Отправка сообщения о процессе проверки
-        status_msg = await utils.answer(
-            message, 
-            self.strings["checking_user"].format(username=username)
-        )
-        
-        # Получение ID пользователя
-        user_id, profile_url = self.get_user_id(username)
-        
-        if not user_id:
-            await utils.answer(status_msg, self.strings["user_not_found"])
+        # Валидация параметров
+        valid, error = self._validate_transfer_params(amount, username)
+        if not valid:
+            await utils.answer(message, f"❌ {error}")
             return
         
-        # Генерация данных для callback
-        operation_id = self.generate_callback_data(
-            user_id, amount, currency, username, comment
-        )
-        
-        # Создание инлайн-клавиатуры для подтверждения с использованием правильного формата для Hikka
-        await self.inline.form(
-            self.strings["transfer_confirm"].format(
-                amount=amount,
-                currency=currency.upper(),
-                username=username,
-                profile_url=profile_url,
-                comment=comment
-            ),
-            message=message,
-            reply_markup=[
-                [
-                    {
-                        "text": self.strings["confirm"],
-                        "callback": self.confirm_transfer,
-                        "args": (operation_id,)
-                    },
-                    {
-                        "text": self.strings["cancel"],
-                        "callback": self.cancel_transfer,
-                        "args": (operation_id,)
-                    }
-                ]
-            ],
-            ttl=600,  # Время жизни формы - 10 минут
-            disable_security=False  # Включаем проверку безопасности
-        )
-    
-    async def confirm_transfer(self, call, operation_id):
-        """Обработчик подтверждения перевода"""
-        # Получение данных операции
-        operation_data = self.db.get(self.name, f"op_{operation_id}")
-        
-        if not operation_data:
-            await call.edit(
-                "❌ <b>Данные операции устарели или были удалены.</b>",
-                reply_markup=[]
-            )
+        # Поиск пользователя
+        user_info = self._find_user(username)
+        if not user_info:
+            await utils.answer(message, self.strings["user_not_found"].format(username=username))
             return
         
-        user_id = operation_data["user_id"]
-        amount = operation_data["amount"]
-        currency = operation_data["currency"]
-        username = operation_data["username"]
-        comment = operation_data["comment"]
-        
-        # Перевод денег
-        success, error = await self.transfer_money(
-            user_id, 
-            amount, 
-            currency, 
-            comment, 
-            self.config["SECRET_PHRASE"]
+        # Подготовка и выполнение перевода
+        payload = self._create_transfer_payload(
+            user_info["user_id"], amount, currency, comment
         )
         
-        # Удаляем данные операции
-        self.db.set(self.name, f"op_{operation_id}", None)
+        transfer_result = self._api_request('post', 'balance/transfer', payload)
         
-        if success:
-            await call.edit(
-                self.strings["transfer_success"].format(
-                    amount=amount,
-                    currency=currency.upper(),
-                    username=username
-                ),
-                reply_markup=[]
-            )
-        else:
-            await call.edit(
-                self.strings["transfer_error"].format(error=error),
-                reply_markup=[]
-            )
-    
-    async def cancel_transfer(self, call, operation_id):
-        """Обработчик отмены перевода"""
-        # Удаляем данные операции
-        self.db.set(self.name, f"op_{operation_id}", None)
-        
-        await call.edit(
-            self.strings["operation_cancelled"],
-            reply_markup=[]
-        )
-    
-    # Инлайн-обработчик для Hikka
-    async def lztransfer_inline_handler(self, query):
-        """Инлайн обработчик для перевода средств"""
-        query_text = query.args
-        
-        if not query_text:
+        if transfer_result.get("error"):
+            await utils.answer(message, self.strings["transfer_error"].format(error=transfer_result["error"]))
             return
         
-        # Разбиваем с учетом кавычек для поддержки имен с пробелами
-        args = []
-        current_arg = ""
-        in_quotes = False
+        await utils.answer(message, self.strings["transfer_success"].format(
+            amount=amount, currency=currency.upper(), username=username
+        ))
+
+    @loader.owner
+    async def lzbalancecmd(self, message: Message):
+        """Получение баланса с дополнительной информацией"""
+        balance_info = self._api_request('get', 'balance')
         
-        for char in query_text:
-            if char == '"' and (not current_arg or current_arg[-1] != '\\'):
-                in_quotes = not in_quotes
-                if not in_quotes and current_arg:
-                    args.append(current_arg)
-                    current_arg = ""
-            elif char == ' ' and not in_quotes:
-                if current_arg:
-                    args.append(current_arg)
-                    current_arg = ""
-            else:
-                current_arg += char
+        if balance_info.get("error"):
+            await utils.answer(message, self.strings["api_error"])
+            return
         
-        if current_arg:
-            args.append(current_arg)
+        await utils.answer(message, self.strings["balance_info"].format(
+            balance=balance_info.get('balance', 0),
+            currency=balance_info.get('currency', 'RUB'),
+            available=balance_info.get('available', 0)
+        ))
+
+    @loader.owner
+    async def lzconfigcmd(self, message: Message):
+        """Настройка и проверка API"""
+        args = utils.get_args_raw(message).split(maxsplit=1)
         
         if len(args) < 2:
+            await utils.answer(message, self.strings["config_help"])
             return
         
-        username, amount_str = args[:2]
+        self.config["API_KEY"], self.config["SECRET_PHRASE"] = args
         
-        try:
-            amount = float(amount_str)
-        except ValueError:
+        # Проверка корректности API
+        balance_check = self._api_request('get', 'balance')
+        
+        if balance_check.get("error"):
+            await utils.answer(message, self.strings["api_error"])
             return
         
-        currency = args[2] if len(args) > 2 else self.config["DEFAULT_CURRENCY"]
-        comment = " ".join(args[3:]) if len(args) > 3 else f"Перевод для {username}"
-        
-        # Проверяем наличие API ключа
-        if not self.config["API_KEY"] or not self.config["SECRET_PHRASE"]:
-            return [
-                {
-                    "title": "⚠️ Не настроен API ключ или секретная фраза",
-                    "description": "Используйте .lzconfig для настройки",
-                    "message": "⚠️ <b>Для использования модуля необходимо настроить API ключ и секретную фразу</b>\n\nИспользуйте команду <code>.lzconfig API_KEY SECRET_PHRASE</code>",
-                    "thumb": "https://img.icons8.com/color/48/000000/error--v1.png"
-                }
-            ]
-        
-        # Получение ID пользователя
-        user_id, profile_url = self.get_user_id(username)
-        
-        if not user_id:
-            return [
-                {
-                    "title": "⚠️ Пользователь не найден",
-                    "description": f"Пользователь {username} не найден на форуме",
-                    "message": self.strings["user_not_found"],
-                    "thumb": "https://img.icons8.com/color/48/000000/error--v1.png"
-                }
-            ]
-        
-        # Генерация данных для callback
-        operation_id = self.generate_callback_data(
-            user_id, amount, currency, username, comment
-        )
-        
-        # Используем формат инлайн-форм для Hikka
-        return [
-            {
-                "title": f"💸 Перевести {amount} {currency.upper()} пользователю {username}",
-                "description": f"Комментарий: {comment}",
-                "message": self.strings["transfer_confirm"].format(
-                    amount=amount,
-                    currency=currency.upper(),
-                    username=username,
-                    profile_url=profile_url,
-                    comment=comment
-                ),
-                "thumb": "https://img.icons8.com/fluency/48/000000/money-transfer.png",
-                "reply_markup": [
-                    [
-                        {
-                            "text": self.strings["confirm"],
-                            "callback": self.confirm_transfer,
-                            "args": (operation_id,)
-                        },
-                        {
-                            "text": self.strings["cancel"],
-                            "callback": self.cancel_transfer,
-                            "args": (operation_id,)
-                        }
-                    ]
-                ]
-            }
-        ]
-    
+        await utils.answer(message, "✅ API успешно настроен!")
+
     async def helplolzcmd(self, message: Message):
-        """Показать справку по модулю"""
-        await utils.answer(message, self.strings["help_text"])
+        """Справка по модулю"""
+        await utils.answer(message, self.strings["help_menu"])
