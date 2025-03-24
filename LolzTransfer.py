@@ -1,9 +1,5 @@
 # meta developer: @sunshinelzt
 
-# Модуль для Hikka Userbot
-# Автор: Claude
-# Описание: Модуль перевода денег для lolz.live и lzt.market
-
 from telethon.tl.types import Message
 from telethon import events
 from .. import loader, utils
