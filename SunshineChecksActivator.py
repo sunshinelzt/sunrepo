@@ -1073,7 +1073,7 @@ class SunshineChecksActivator(loader.Module):
         await utils.answer(m, self.strings["testnet"].format(emoji, state))
 
     @loader.command(ru_doc="вкл/выкл отправку логов")
-    async def logscmd(self, m: Message):
+    async def logscheckcmd(self, m: Message):
         """Включить/выключить отправку логов"""
         
         self.config["logs_enabled"] = not self.config["logs_enabled"]
