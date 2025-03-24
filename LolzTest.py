@@ -1,0 +1,656 @@
+# meta developer: @sunshinelzt
+# переработано для оптимальной работы с API zelenka.guru/lolz.live
+
+from telethon.tl.types import Message
+from telethon import events
+from .. import loader, utils
+import logging
+import requests
+import json
+import hashlib
+import urllib.parse
+import asyncio
+from typing import Union, Tuple, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
+
+@loader.tds
+class LolzTransferMod(loader.Module):
+    """Модуль для перевода денег на форуме lolz.live/zelenka.guru"""
+    
+    strings = {
+        "name": "LolzTransfer",
+        "no_api": "⚠️ <b>API ключ не установлен. Используйте .lzconfig</b>",
+        "no_secret": "⚠️ <b>Секретная фраза не установлена. Используйте .lzconfig</b>",
+        "config_saved": "✅ <b>Конфигурация успешно сохранена!</b>",
+        "invalid_amount": "⚠️ <b>Неверная сумма. Пожалуйста, введите корректное число.</b>",
+        "user_not_found": "⚠️ <b>Пользователь не найден на форуме.</b>",
+        "transfer_success": "✅ <b>Успешно переведено {amount} {currency} пользователю {username}!</b>",
+        "transfer_error": "❌ <b>Ошибка при переводе средств: {error}</b>",
+        "transfer_confirm": "💸 <b>Вы собираетесь перевести {amount} {currency} пользователю <a href='{profile_url}'>{username}</a>.</b>\n\n<b>Комментарий:</b> {comment}",
+        "confirm": "✅ Подтвердить",
+        "cancel": "❌ Отменить",
+        "operation_cancelled": "❌ <b>Операция отменена.</b>",
+        "checking_user": "🔍 <b>Проверка пользователя {username}...</b>",
+        "api_error": "❌ <b>Ошибка API: {error}</b>",
+        "balance_info": "💰 <b>Ваш баланс:</b>\n{balance_info}",
+        "help_text": (
+            "<b>🔹 Помощь по модулю LolzTransfer:</b>\n\n"
+            "<code>.lzconfig [API_KEY] [SECRET_PHRASE]</code> - Настроить API ключ и секретную фразу\n"
+            "<code>.lztransfer [username] [сумма] [валюта] [комментарий]</code> - Перевести деньги\n"
+            "<code>.lzbalance</code> - Проверить баланс\n"
+            "<code>.lzhistory [количество]</code> - История операций\n\n"
+            "<b>Параметры:</b>\n"
+            "<code>валюта</code> - Необязательно, по умолчанию 'rub'\n"
+            "<code>комментарий</code> - Необязательно\n"
+            "<code>количество</code> - Необязательно, количество записей (макс. 50)"
+        )
+    }
+
+    def __init__(self):
+        self.config = loader.ModuleConfig(
+            "API_KEY", "", "API Ключ Lolz.Market/Zelenka.Guru",
+            "SECRET_PHRASE", "", "Секретная фраза для подтверждения переводов",
+            "DEFAULT_CURRENCY", "rub", "Валюта по умолчанию (rub, usd и т.д.)",
+            "DEFAULT_HOLD", 0, "Срок холда по умолчанию (0 для отсутствия холда)",
+            "DEFAULT_HOLD_OPTION", "day", "Опция холда по умолчанию (day, month)",
+            "API_URL_FORUM", "https://api.lolz.live", "URL API форума",
+            "API_URL_MARKET", "https://api.lzt.market", "URL API маркета",
+        )
+        self.name = self.strings["name"]
+
+    async def client_ready(self, client, db):
+        """Инициализация при готовности клиента"""
+        self.client = client
+        self.db = db
+        self._cache = {}
+        self._semaphore = asyncio.Semaphore(3)  # Ограничение параллельных запросов
+        
+    async def _make_request(self, method: str, url: str, headers: Dict[str, str], 
+                            params: Optional[Dict[str, Any]] = None, 
+                            json_data: Optional[Dict[str, Any]] = None) -> Tuple[bool, Union[Dict[str, Any], str]]:
+        """
+        Универсальный метод для выполнения HTTP запросов с обработкой ошибок
+        
+        Args:
+            method: HTTP метод (GET, POST и т.д.)
+            url: URL для запроса
+            headers: Заголовки запроса
+            params: Параметры запроса (для GET)
+            json_data: JSON данные (для POST)
+            
+        Returns:
+            Tuple[bool, Union[Dict[str, Any], str]]: (успех, данные/сообщение об ошибке)
+        """
+        async with self._semaphore:
+            try:
+                if method.upper() == "GET":
+                    response = requests.get(url, headers=headers, params=params)
+                elif method.upper() == "POST":
+                    response = requests.post(url, headers=headers, json=json_data)
+                else:
+                    return False, f"Неподдерживаемый метод: {method}"
+                
+                # Обработка ответа
+                if response.status_code == 200:
+                    try:
+                        return True, response.json()
+                    except json.JSONDecodeError:
+                        return True, response.text
+                else:
+                    try:
+                        error_data = response.json()
+                        error_msg = error_data.get("message", f"Код ошибки: {response.status_code}")
+                    except json.JSONDecodeError:
+                        error_msg = f"Код ошибки: {response.status_code}, текст: {response.text[:100]}"
+                    
+                    return False, error_msg
+                    
+            except Exception as e:
+                logger.error(f"Ошибка запроса {url}: {e}")
+                return False, str(e)
+    
+    async def get_user_by_username(self, username: str) -> Tuple[Optional[int], Optional[str], Optional[str]]:
+        """
+        Усовершенствованный поиск пользователя по имени пользователя
+        
+        Args:
+            username: Имя пользователя для поиска
+            
+        Returns:
+            Tuple[Optional[int], Optional[str], Optional[str]]: (ID пользователя, URL профиля, имя пользователя)
+        """
+        if not self.config["API_KEY"]:
+            return None, None, None
+            
+        # Кэширование результатов для оптимизации
+        cache_key = f"user_{username.lower()}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+            
+        headers = {"Authorization": f"Bearer {self.config['API_KEY']}"}
+        
+        # Метод 1: Прямой поиск по API find
+        encoded_username = urllib.parse.quote(username)
+        success, data = await self._make_request(
+            "GET", 
+            f"{self.config['API_URL_FORUM']}/users/find?username={encoded_username}",
+            headers
+        )
+        
+        if success and data.get("user_id"):
+            result = (
+                data["user_id"], 
+                f"https://lolz.live/members/{data['user_id']}", 
+                data.get("username", username)
+            )
+            self._cache[cache_key] = result
+            return result
+            
+        # Метод 2: Поиск через API search с точным совпадением
+        success, data = await self._make_request(
+            "GET",
+            f"{self.config['API_URL_FORUM']}/users/search",
+            headers,
+            params={"username": username}
+        )
+        
+        if success and isinstance(data, list):
+            for user in data:
+                if user.get("username", "").lower() == username.lower():
+                    result = (
+                        user["user_id"],
+                        f"https://lolz.live/members/{user['user_id']}",
+                        user["username"]
+                    )
+                    self._cache[cache_key] = result
+                    return result
+                    
+        # Метод 3: Поиск по email, если передан email
+        if "@" in username and "." in username:
+            success, data = await self._make_request(
+                "GET",
+                f"{self.config['API_URL_FORUM']}/users/find-by-email",
+                headers,
+                params={"email": username}
+            )
+            
+            if success and data.get("user_id"):
+                result = (
+                    data["user_id"],
+                    f"https://lolz.live/members/{data['user_id']}",
+                    data.get("username", username)
+                )
+                self._cache[cache_key] = result
+                return result
+                
+        # Пользователь не найден
+        return None, None, None
+        
+    async def get_balance(self) -> Tuple[bool, Union[Dict[str, Any], str]]:
+        """Получение баланса пользователя"""
+        if not self.config["API_KEY"]:
+            return False, self.strings["no_api"]
+            
+        headers = {"Authorization": f"Bearer {self.config['API_KEY']}"}
+        return await self._make_request(
+            "GET",
+            f"{self.config['API_URL_MARKET']}/balance",
+            headers
+        )
+        
+    async def get_history(self, limit: int = 10) -> Tuple[bool, Union[Dict[str, Any], str]]:
+        """Получение истории операций"""
+        if not self.config["API_KEY"]:
+            return False, self.strings["no_api"]
+            
+        headers = {"Authorization": f"Bearer {self.config['API_KEY']}"}
+        return await self._make_request(
+            "GET",
+            f"{self.config['API_URL_MARKET']}/balance/history",
+            headers,
+            params={"limit": min(limit, 50)}  # Ограничение максимального количества
+        )
+        
+    async def transfer_money(self, user_id: int, amount: float, currency: str, 
+                           comment: str, secret_answer: str) -> Tuple[bool, Optional[str]]:
+        """
+        Перевод денег через API маркета
+        
+        Args:
+            user_id: ID пользователя
+            amount: Сумма перевода
+            currency: Валюта перевода
+            comment: Комментарий к переводу
+            secret_answer: Секретная фраза
+            
+        Returns:
+            Tuple[bool, Optional[str]]: (успех, сообщение об ошибке)
+        """
+        if not self.config["API_KEY"]:
+            return False, self.strings["no_api"]
+            
+        headers = {"Authorization": f"Bearer {self.config['API_KEY']}"}
+        payload = {
+            "amount": float(amount),
+            "currency": currency.lower(),
+            "secret_answer": secret_answer,
+            "user_id": int(user_id),
+            "comment": comment,
+            "hold": self.config["DEFAULT_HOLD"],
+            "hold_option": self.config["DEFAULT_HOLD_OPTION"]
+        }
+        
+        success, data = await self._make_request(
+            "POST",
+            f"{self.config['API_URL_MARKET']}/balance/transfer",
+            headers,
+            json_data=payload
+        )
+        
+        if success:
+            return True, None
+        else:
+            return False, data
+    
+    def generate_operation_id(self, user_id: int, amount: float, currency: str, 
+                           username: str, comment: str) -> str:
+        """
+        Генерация уникального идентификатора операции
+        
+        Args:
+            user_id: ID пользователя
+            amount: Сумма перевода
+            currency: Валюта перевода
+            username: Имя пользователя
+            comment: Комментарий к переводу
+            
+        Returns:
+            str: Уникальный идентификатор операции
+        """
+        # Создаем уникальный идентификатор для операции
+        raw_data = f"{user_id}_{amount}_{currency}_{username}_{comment}_{utils.rand(16)}"
+        operation_id = hashlib.md5(raw_data.encode()).hexdigest()[:12]
+        
+        # Сохраняем данные в базу
+        self.db.set(self.name, f"op_{operation_id}", {
+            "user_id": user_id,
+            "amount": amount,
+            "currency": currency,
+            "username": username,
+            "comment": comment,
+            "timestamp": utils.time.time()  # Добавляем временную метку для отслеживания устаревших операций
+        })
+        
+        return operation_id
+    
+    @loader.owner
+    async def lzconfigcmd(self, message: Message):
+        """Настроить API ключ и секретную фразу"""
+        args = utils.get_args_raw(message).split(maxsplit=1)
+        
+        if len(args) < 2:
+            await utils.answer(
+                message,
+                "<b>🔧 Настройка LolzTransfer</b>\n\n"
+                "<code>.lzconfig [API_KEY] [SECRET_PHRASE]</code>\n\n"
+                "Получить API ключ можно в настройках профиля на lolz.live/zelenka.guru"
+            )
+            return
+        
+        api_key, secret_phrase = args
+        
+        self.config["API_KEY"] = api_key.strip()
+        self.config["SECRET_PHRASE"] = secret_phrase.strip()
+        
+        # Проверяем валидность API ключа
+        success, data = await self.get_balance()
+        
+        if success:
+            # Очищаем кэш при изменении API ключа
+            self._cache = {}
+            await utils.answer(message, self.strings["config_saved"])
+        else:
+            self.config["API_KEY"] = ""
+            self.config["SECRET_PHRASE"] = ""
+            await utils.answer(message, f"❌ <b>Ошибка настройки:</b> {data}")
+    
+    @loader.owner
+    async def lzbalancecmd(self, message: Message):
+        """Проверить баланс"""
+        if not self.config["API_KEY"]:
+            await utils.answer(message, self.strings["no_api"])
+            return
+            
+        status_msg = await utils.answer(message, "🔄 <b>Получение информации о балансе...</b>")
+        
+        success, data = await self.get_balance()
+        
+        if success:
+            balance_text = ""
+            for currency, amount in data.items():
+                if isinstance(amount, (int, float)) and amount > 0:
+                    balance_text += f"• <b>{currency.upper()}</b>: {amount}\n"
+            
+            if not balance_text:
+                balance_text = "• На балансе нет средств"
+                
+            await utils.answer(status_msg, self.strings["balance_info"].format(balance_info=balance_text))
+        else:
+            await utils.answer(status_msg, self.strings["api_error"].format(error=data))
+    
+    @loader.owner
+    async def lzhistorycmd(self, message: Message):
+        """История операций"""
+        if not self.config["API_KEY"]:
+            await utils.answer(message, self.strings["no_api"])
+            return
+            
+        args = utils.get_args_raw(message)
+        try:
+            limit = int(args) if args else 10
+        except ValueError:
+            limit = 10
+            
+        status_msg = await utils.answer(message, "🔄 <b>Получение истории операций...</b>")
+        
+        success, data = await self.get_history(limit)
+        
+        if success:
+            if not data:
+                await utils.answer(status_msg, "📜 <b>История операций пуста</b>")
+                return
+                
+            history_text = "<b>📜 История операций:</b>\n\n"
+            
+            for item in data:
+                operation_type = item.get("type", "unknown")
+                amount = item.get("amount", 0)
+                currency = item.get("currency", "").upper()
+                description = item.get("description", "Нет описания")
+                timestamp = item.get("date", 0)
+                
+                if operation_type == "income":
+                    icon = "📥"
+                elif operation_type == "outcome":
+                    icon = "📤"
+                else:
+                    icon = "🔄"
+                    
+                history_text += f"{icon} <b>{amount} {currency}</b>: {description}\n"
+                
+            await utils.answer(status_msg, history_text)
+        else:
+            await utils.answer(status_msg, self.strings["api_error"].format(error=data))
+    
+    @loader.owner
+    async def lztransfercmd(self, message: Message):
+        """Перевести деньги пользователю"""
+        if not self.config["API_KEY"]:
+            await utils.answer(message, self.strings["no_api"])
+            return
+        
+        if not self.config["SECRET_PHRASE"]:
+            await utils.answer(message, self.strings["no_secret"])
+            return
+        
+        args = utils.get_args_raw(message)
+        
+        # Парсинг аргументов с поддержкой кавычек
+        parsed_args = []
+        current_arg = ""
+        in_quotes = False
+        
+        for char in args + " ":  # Добавляем пробел для обработки последнего аргумента
+            if char == '"' and (not current_arg or current_arg[-1] != '\\'):
+                in_quotes = not in_quotes
+                if not in_quotes and current_arg:
+                    parsed_args.append(current_arg)
+                    current_arg = ""
+            elif char == ' ' and not in_quotes:
+                if current_arg:
+                    parsed_args.append(current_arg)
+                    current_arg = ""
+            else:
+                current_arg += char
+        
+        if len(parsed_args) < 2:
+            await utils.answer(message, self.strings["help_text"])
+            return
+        
+        # Парсинг аргументов
+        username = parsed_args[0]
+        
+        try:
+            amount = float(parsed_args[1])
+        except ValueError:
+            await utils.answer(message, self.strings["invalid_amount"])
+            return
+        
+        currency = parsed_args[2] if len(parsed_args) > 2 else self.config["DEFAULT_CURRENCY"]
+        comment = parsed_args[3] if len(parsed_args) > 3 else f"Перевод для {username}"
+        
+        # Отправка сообщения о процессе проверки
+        status_msg = await utils.answer(
+            message, 
+            self.strings["checking_user"].format(username=username)
+        )
+        
+        # Получение ID пользователя
+        user_id, profile_url, actual_username = await self.get_user_by_username(username)
+        
+        if not user_id:
+            await utils.answer(status_msg, self.strings["user_not_found"])
+            return
+        
+        # Используем фактическое имя пользователя из API
+        display_username = actual_username or username
+        
+        # Генерация идентификатора операции
+        operation_id = self.generate_operation_id(
+            user_id, amount, currency, display_username, comment
+        )
+        
+        # Создание инлайн-клавиатуры для подтверждения
+        await self.inline.form(
+            self.strings["transfer_confirm"].format(
+                amount=amount,
+                currency=currency.upper(),
+                username=display_username,
+                profile_url=profile_url,
+                comment=comment
+            ),
+            message=message,
+            reply_markup=[
+                [
+                    {
+                        "text": self.strings["confirm"],
+                        "callback": self.confirm_transfer,
+                        "args": (operation_id,)
+                    },
+                    {
+                        "text": self.strings["cancel"],
+                        "callback": self.cancel_transfer,
+                        "args": (operation_id,)
+                    }
+                ]
+            ],
+            ttl=300,  # Время жизни формы - 5 минут
+            disable_security=False
+        )
+    
+    async def confirm_transfer(self, call, operation_id):
+        """Обработчик подтверждения перевода"""
+        # Получение данных операции
+        operation_data = self.db.get(self.name, f"op_{operation_id}")
+        
+        if not operation_data:
+            await call.edit(
+                "❌ <b>Данные операции устарели или были удалены.</b>",
+                reply_markup=[]
+            )
+            return
+        
+        # Проверка на истечение срока действия операции (10 минут)
+        current_time = utils.time.time()
+        if current_time - operation_data.get("timestamp", 0) > 600:
+            await call.edit(
+                "❌ <b>Время действия операции истекло.</b>",
+                reply_markup=[]
+            )
+            self.db.set(self.name, f"op_{operation_id}", None)
+            return
+        
+        user_id = operation_data["user_id"]
+        amount = operation_data["amount"]
+        currency = operation_data["currency"]
+        username = operation_data["username"]
+        comment = operation_data["comment"]
+        
+        # Обновление сообщения
+        await call.edit(
+            f"🔄 <b>Выполняется перевод {amount} {currency.upper()} пользователю {username}...</b>",
+            reply_markup=[]
+        )
+        
+        # Перевод денег
+        success, error = await self.transfer_money(
+            user_id, 
+            amount, 
+            currency, 
+            comment, 
+            self.config["SECRET_PHRASE"]
+        )
+        
+        # Удаляем данные операции
+        self.db.set(self.name, f"op_{operation_id}", None)
+        
+        if success:
+            await call.edit(
+                self.strings["transfer_success"].format(
+                    amount=amount,
+                    currency=currency.upper(),
+                    username=username
+                )
+            )
+        else:
+            await call.edit(
+                self.strings["transfer_error"].format(error=error)
+            )
+    
+    async def cancel_transfer(self, call, operation_id):
+        """Обработчик отмены перевода"""
+        # Удаляем данные операции
+        self.db.set(self.name, f"op_{operation_id}", None)
+        
+        await call.edit(
+            self.strings["operation_cancelled"]
+        )
+    
+    # Инлайн-обработчик для Hikka
+    async def lztransfer_inline_handler(self, query):
+        """Инлайн обработчик для перевода средств"""
+        query_text = query.args
+        
+        if not query_text:
+            return
+        
+        # Разбиваем с учетом кавычек для поддержки имен с пробелами
+        args = []
+        current_arg = ""
+        in_quotes = False
+        
+        for char in query_text:
+            if char == '"' and (not current_arg or current_arg[-1] != '\\'):
+                in_quotes = not in_quotes
+                if not in_quotes and current_arg:
+                    args.append(current_arg)
+                    current_arg = ""
+            elif char == ' ' and not in_quotes:
+                if current_arg:
+                    args.append(current_arg)
+                    current_arg = ""
+            else:
+                current_arg += char
+        
+        if current_arg:
+            args.append(current_arg)
+        
+        if len(args) < 2:
+            return
+        
+        username, amount_str = args[:2]
+        
+        try:
+            amount = float(amount_str)
+        except ValueError:
+            return
+        
+        currency = args[2] if len(args) > 2 else self.config["DEFAULT_CURRENCY"]
+        comment = " ".join(args[3:]) if len(args) > 3 else f"Перевод для {username}"
+        
+        # Проверяем наличие API ключа
+        if not self.config["API_KEY"] or not self.config["SECRET_PHRASE"]:
+            return [
+                {
+                    "title": "⚠️ Не настроен API ключ или секретная фраза",
+                    "description": "Используйте .lzconfig для настройки",
+                    "message": "⚠️ <b>Для использования модуля необходимо настроить API ключ и секретную фразу</b>\n\nИспользуйте команду <code>.lzconfig API_KEY SECRET_PHRASE</code>",
+                    "thumb": "https://img.icons8.com/color/48/000000/error--v1.png"
+                }
+            ]
+        
+        # Получение ID пользователя
+        user_id, profile_url, actual_username = await self.get_user_by_username(username)
+        
+        if not user_id:
+            return [
+                {
+                    "title": "⚠️ Пользователь не найден",
+                    "description": f"Пользователь {username} не найден на форуме",
+                    "message": self.strings["user_not_found"],
+                    "thumb": "https://img.icons8.com/color/48/000000/error--v1.png"
+                }
+            ]
+        
+        # Используем фактическое имя пользователя из API
+        display_username = actual_username or username
+        
+        # Генерация данных для callback
+        operation_id = self.generate_operation_id(
+            user_id, amount, currency, display_username, comment
+        )
+        
+        # Используем формат инлайн-форм для Hikka
+        return [
+            {
+                "title": f"💸 Перевести {amount} {currency.upper()} пользователю {display_username}",
+                "description": f"Комментарий: {comment}",
+                "message": self.strings["transfer_confirm"].format(
+                    amount=amount,
+                    currency=currency.upper(),
+                    username=display_username,
+                    profile_url=profile_url,
+                    comment=comment
+                ),
+                "thumb": "https://img.icons8.com/fluency/48/000000/money-transfer.png",
+                "reply_markup": [
+                    [
+                        {
+                            "text": self.strings["confirm"],
+                            "callback": self.confirm_transfer,
+                            "args": (operation_id,)
+                        },
+                        {
+                            "text": self.strings["cancel"],
+                            "callback": self.cancel_transfer,
+                            "args": (operation_id,)
+                        }
+                    ]
+                ]
+            }
+        ]
+    
+    async def helplolzcmd(self, message: Message):
+        """Показать справку по модулю"""
+        await utils.answer(message, self.strings["help_text"])
