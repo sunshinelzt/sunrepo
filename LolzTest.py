@@ -64,7 +64,7 @@ class LolzTransferMod(loader.Module):
                 "max_transfer_amount",
                 10000,
                 doc="Максимальная сумма одного перевода",
-                validator=loader.validators.Integer(min_value=100, max_value=100000)
+                validator=loader.validators.Integer(min_value=1, max_value=100000)
             )
         )
 
