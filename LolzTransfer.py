@@ -384,6 +384,6 @@ class LolzTransferMod(loader.Module):
             }
         ]
     
-    async def helpcmd(self, message: Message):
+    async def helplolzcmd(self, message: Message):
         """Показать справку по модулю"""
         await utils.answer(message, self.strings["help_text"])
