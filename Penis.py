@@ -1,4 +1,4 @@
-# членики
+# членикиии
 
 import requests
 import asyncio
@@ -58,8 +58,7 @@ class LolzTransferMod(loader.Module):
             loader.ConfigValue(
                 "hold",
                 0,
-                doc="Время холда в днях перед переводом средств",
-                validator=loader.validators.Integer(min_value=0, max_value=30)
+                doc="Время холда в днях перед переводом средств"
             )
         )
 
