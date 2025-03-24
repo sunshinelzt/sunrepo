@@ -9,7 +9,7 @@ import urllib.parse
 import requests
 from typing import Dict, Optional, Tuple
 
-class LolzTransferUltimate(loader.Module):
+class LolzTransfer(loader.Module):
     """Продвинутый модуль финансовых операций для Lolz.market"""
 
     strings = {
