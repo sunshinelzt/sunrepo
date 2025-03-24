@@ -13,7 +13,7 @@ class LolzTransfer(loader.Module):
     """Продвинутый модуль финансовых операций для Lolz.market"""
 
     strings = {
-        "name": "💰 LolzTransfer",
+        "name": "LolzTransfer",
         "config_help": "🔧 Настройка API: .lzconfig API_KEY SECRET_PHRASE",
         "transfer_usage": "💸 Перевод: .lztransfer username amount [currency] [comment]",
         "api_error": "🚫 Ошибка API: Проверьте настройки",
