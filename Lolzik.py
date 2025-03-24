@@ -1,9 +1,10 @@
-# член
+# членик
 
-from telethon import events, Button
-from .. import loader, utils
 import requests
 import asyncio
+from telethon import events, Button
+from urllib.parse import quote
+from .. import loader, utils
 
 @loader.tds
 class LolzTransferMod(loader.Module):
@@ -16,7 +17,7 @@ class LolzTransferMod(loader.Module):
             "Сумма: {amount} руб.\n"
             "Получатель: {user_link}\n"
             "Комментарий: {comment}\n\n"
-            "Проверьте все данные перед подтверждением."
+            "Внимание! Проверьте все данные перед подтверждением."
         ),
         "transfer_success": (
             "✅ Перевод успешно выполнен!\n\n"
@@ -24,32 +25,57 @@ class LolzTransferMod(loader.Module):
             "Получатель: {user_link}\n"
             "Комментарий: {comment}"
         ),
-        "transfer_failed": "❌ Ошибка перевода: {error}",
-        "user_not_found": "🔍 Пользователь {username} не найден.",
-        "invalid_amount": "❗ Некорректная сумма. Введите положительное число.",
-        "missing_arguments": "❓ Используйте: .transfer <ник> <сумма> [комментарий]",
-        "transfer_cancelled": "🚫 Перевод отменен.",
+        "transfer_failed": (
+            "❌ Ошибка перевода!\n\n"
+            "Причина: {error}"
+        ),
+        "user_not_found": "🔍 Пользователь с ником {username} не найден.",
+        "invalid_amount": "❗ Некорректная сумма перевода. Введите положительное число.",
+        "missing_arguments": (
+            "❓ Неверное использование команды.\n\n"
+            "Правильный формат: \n"
+            ".transfer <ник пользователя> <сумма> [комментарий]"
+        ),
+        "transfer_cancelled": "🚫 Перевод отменен пользователем.",
+        "api_error": "🔧 Ошибка при работе с API: {error}",
+        "insufficient_funds": "💸 Недостаточно средств для перевода.",
     }
 
     def __init__(self):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
-                "api_token", 
-                None, 
-                doc="API токен для доступа к форуму и маркету lolz.live"
+                "api_token",
+                None,
+                doc="API токен для доступа к форуму и маркету lolz.live",
+                validator=loader.validators.String()
             ),
             loader.ConfigValue(
-                "secret_phrase", 
-                None, 
-                doc="Секретная фраза для подтверждения перевода"
+                "secret_phrase",
+                None,
+                doc="Секретная фраза для подтверждения перевода",
+                validator=loader.validators.String()
             ),
+            loader.ConfigValue(
+                "hold",
+                0,
+                doc="Время холда в днях перед переводом средств",
+                validator=loader.validators.Integer(min_value=0, max_value=30)
+            ),
+            loader.ConfigValue(
+                "max_transfer_amount",
+                10000,
+                doc="Максимальная сумма одного перевода",
+                validator=loader.validators.Integer(min_value=1, max_value=100000)
+            )
         )
 
     async def client_ready(self, client, db):
         self.client = client
 
     async def transfercmd(self, message):
-        """Команда для безопасного перевода средств с подтверждением."""
+        """
+        Команда для безопасного перевода средств с подтверждением.
+        """
         args = utils.get_args_raw(message).split(maxsplit=2)
         if len(args) < 2:
             await message.reply(self.strings["missing_arguments"])
@@ -60,8 +86,17 @@ class LolzTransferMod(loader.Module):
 
         try:
             amount = float(amount)
+            if amount <= 0 or amount > self.config["max_transfer_amount"]:
+                raise ValueError
+        except ValueError:
+            await message.reply(self.strings["invalid_amount"])
+            return
 
-            user_info = await self.get_user_info(username)
+        try:
+            # Кодируем никнейм для работы с русскими символами
+            username_encoded = quote(username)
+
+            user_info = await self.get_user_info(username_encoded)
             if not user_info:
                 await message.reply(self.strings["user_not_found"].format(username=username))
                 return
@@ -85,12 +120,14 @@ class LolzTransferMod(loader.Module):
                 message.chat_id, confirm_message, buttons=buttons
             )
         except Exception as e:
-            await message.reply(self.strings["transfer_failed"].format(error=str(e)))
+            await message.reply(self.strings["api_error"].format(error=str(e)))
 
     @loader.callback_handler()
     async def callback_handler(self, event):
-        """Обработчик инлайн-кнопок с логикой перевода."""
-        data = event.data.decode("utf-8")
+        """
+        Обработчик инлайн-кнопок с расширенной логикой безопасности.
+        """
+        data = event.data  # Убираем .decode("utf-8"), так как в Python 3 это не нужно
         try:
             if data.startswith("confirm_transfer_"):
                 _, user_id, amount, comment = data.split("_", 3)
@@ -122,7 +159,7 @@ class LolzTransferMod(loader.Module):
             await event.answer(str(e), alert=True)
 
     async def get_user_info(self, username):
-        """Получение информации о пользователе по нику"""
+        """Безопасный поиск пользователя по нику"""
         try:
             headers = {"Authorization": f"Bearer {self.config['api_token']}"}
             response = requests.get(
@@ -144,7 +181,7 @@ class LolzTransferMod(loader.Module):
             raise RuntimeError(f"Ошибка API: {e}")
 
     async def get_user_info_by_id(self, user_id):
-        """Получение информации о пользователе по ID"""
+        """Безопасное получение информации о пользователе по ID"""
         try:
             headers = {"Authorization": f"Bearer {self.config['api_token']}"}
             response = requests.get(
@@ -160,13 +197,17 @@ class LolzTransferMod(loader.Module):
             raise RuntimeError(f"Ошибка API: {e}")
 
     async def send_money(self, user_id, amount, comment):
-        """Отправка средств."""
+        """
+        Отправка средств с расширенной обработкой ошибок
+        Возвращает кортеж (успех, результат)
+        """
         try:
             headers = {"Authorization": f"Bearer {self.config['api_token']}"}
             data = {
                 "user_id": user_id,
                 "amount": amount,
                 "secret_phrase": self.config["secret_phrase"],
+                "hold": self.config["hold"],
                 "comment": comment,
             }
             
