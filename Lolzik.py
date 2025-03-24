@@ -1,4 +1,4 @@
-# членик
+# членики
 
 import requests
 import asyncio
@@ -60,12 +60,6 @@ class LolzTransferMod(loader.Module):
                 0,
                 doc="Время холда в днях перед переводом средств",
                 validator=loader.validators.Integer(min_value=0, max_value=30)
-            ),
-            loader.ConfigValue(
-                "max_transfer_amount",
-                10000,
-                doc="Максимальная сумма одного перевода",
-                validator=loader.validators.Integer(min_value=1, max_value=100000)
             )
         )
 
@@ -86,7 +80,7 @@ class LolzTransferMod(loader.Module):
 
         try:
             amount = float(amount)
-            if amount <= 0 or amount > self.config["max_transfer_amount"]:
+            if amount <= 0:
                 raise ValueError
         except ValueError:
             await message.reply(self.strings["invalid_amount"])
