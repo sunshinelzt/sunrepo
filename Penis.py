@@ -1,4 +1,4 @@
-# членикиии
+# членикииипенис
 
 import requests
 import asyncio
@@ -39,6 +39,7 @@ class LolzTransferMod(loader.Module):
         "transfer_cancelled": "🚫 Перевод отменен пользователем.",
         "api_error": "🔧 Ошибка при работе с API: {error}",
         "insufficient_funds": "💸 Недостаточно средств для перевода.",
+        "sunshine_bot_info": "🤖 Для подтверждения перевода и выполнения действий, пожалуйста, нажмите на одну из кнопок ниже."
     }
 
     def __init__(self):
@@ -104,13 +105,21 @@ class LolzTransferMod(loader.Module):
             )
             buttons = [
                 [
-                    Button.inline("✅ Подтвердить", data=f"confirm_transfer_{user_id}_{amount}_{comment}"),
-                    Button.inline("❌ Отмена", data="cancel_transfer")
+                    Button.inline(
+                        "✅ Подтвердить", 
+                        data=f"confirm_transfer_{user_id}_{amount}_{comment}"
+                    ),
+                    Button.inline(
+                        "❌ Отмена", 
+                        data="cancel_transfer"
+                    )
                 ]
             ]
 
+            # Отправка сообщения с кнопками через Sunshine Bot
+            sunshine_bot_message = self.strings["sunshine_bot_info"]
             await self.client.send_message(
-                message.chat_id, confirm_message, buttons=buttons
+                message.chat_id, confirm_message + "\n\n" + sunshine_bot_message, buttons=buttons
             )
         except Exception as e:
             await message.reply(self.strings["api_error"].format(error=str(e)))
