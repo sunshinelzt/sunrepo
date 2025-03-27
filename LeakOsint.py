@@ -1,9 +1,8 @@
 # meta developer: @sunshinelzt
-# писядва
+# писядвапися
 
 import asyncio
 import logging
-import re
 from typing import Dict, List
 
 import aiohttp
@@ -11,7 +10,7 @@ from .. import loader, utils
 
 
 class LeakOsintMod(loader.Module):
-    """Продвинутый OSINT модуль с расширенной безопасностью и функциональностью"""
+    """Расширенный OSINT модуль для поиска любых утечек"""
 
     strings = {
         "name": "LeakOsint",
@@ -22,26 +21,21 @@ class LeakOsintMod(loader.Module):
         "rate_limit": "⏳ Превышен лимит запросов",
     }
 
-    IMPORTANT_FIELDS = ["email", "phone", "password", "login", "ip", "address"]
+    IMPORTANT_FIELDS = [
+        "email", "phone", "password", "login", "ip", "address",
+        "username", "card", "hash", "birthdate", "token", "domain"
+    ]
 
     def __init__(self):
         self.config = loader.ModuleConfig(
             "bot_name", "@YouLeakOsint_bot", "Имя бота для API",
             "api_token", "", "API-токен для доступа к LeakOsint",
             "api_url", "https://leakosintapi.com/", "URL API для запросов",
-            "limit", 200, "Максимальное количество результатов (100-10000)",
+            "limit", 500, "Максимальное количество результатов (100-10000)",
             "lang", "ru", "Язык ответа от API",
-            "timeout", 30, "Таймаут запроса (в секундах)"
+            "timeout", 40, "Таймаут запроса (в секундах)"
         )
         self.logger = logging.getLogger(self.__class__.__name__)
-
-    async def _validate_query(self, query: str) -> bool:
-        """Проверка корректности поискового запроса"""
-        if not query or len(query) < 2 or len(query) > 100:
-            return False
-        # Разрешены только буквы, цифры, пробелы, точки и дефисы
-        safe_pattern = re.compile(r'^[а-яА-ЯёЁa-zA-Z0-9\s\-\.]+$')
-        return bool(safe_pattern.match(query))
 
     async def _api_request(self, payload: Dict) -> Dict:
         """Выполнение безопасного асинхронного запроса к API"""
@@ -68,14 +62,11 @@ class LeakOsintMod(loader.Module):
 
     @loader.command()
     async def osint(self, message):
-        """Выполнить OSINT-поиск по утечкам"""
+        """Выполнить OSINT-поиск по любому запросу"""
         query = utils.get_args_raw(message)
 
         if not query:
             return await message.edit("❓ Укажите запрос для поиска")
-
-        if not await self._validate_query(query):
-            return await message.edit("⚠️ Некорректный формат запроса")
 
         if not self.config["api_token"]:
             return await message.edit(self.strings["invalid_token"])
@@ -113,7 +104,7 @@ class LeakOsintMod(loader.Module):
             await message.respond(chunk, parse_mode="html")
 
     def _format_reports(self, response: Dict) -> str:
-        """Форматирование отчета в сжатом и удобочитаемом виде"""
+        """Форматирование отчета с важной информацией"""
         report_parts = []
 
         for db_name, db_data in response.get("List", {}).items():
@@ -125,10 +116,10 @@ class LeakOsintMod(loader.Module):
 
             details = []
             for record in db_data.get("Data", []):
-                # Извлекаем только важные поля
+                # Фильтруем только важные данные
                 important_data = {
                     key: value for key, value in record.items()
-                    if key.lower() in self.IMPORTANT_FIELDS
+                    if key.lower() in self.IMPORTANT_FIELDS and value
                 }
 
                 if important_data:
@@ -144,7 +135,7 @@ class LeakOsintMod(loader.Module):
 
         # Соединяем отчет и ограничиваем длину
         full_report = "\n".join(report_parts)
-        return full_report[:10000]
+        return full_report[:15000]
 
     def _split_long_message(self, text: str, max_length: int = 4096) -> List[str]:
         """Разбиение длинных сообщений на части"""
