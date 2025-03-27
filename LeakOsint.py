@@ -1,5 +1,5 @@
 # meta developer: @sunshinelzt
-# писядвапися
+# писядваписяп
 
 import aiohttp
 import json
@@ -101,16 +101,16 @@ class LeakOsintMod(loader.Module):
         return buttons
 
     @loader.command()
-    async def leak(self, message: str):
+    async def leak(self, message):
         """Команда для поиска информации по запросу"""
-        query = message.text.split(" ", 1)[1]
+        query = message.text.split(" ", 1)[1] if len(message.text.split(" ", 1)) > 1 else None
 
         if not query:
             await message.reply(self.strings["no_query"])
             return
 
         # Получаем данные о пользователе
-        user = message.sender.username if message.sender.username else message.sender.id
+        user = message.sender.username if message.sender.username else str(message.sender.id)
         
         # Формат по умолчанию
         output_format = self.config["output_format"]
@@ -152,7 +152,7 @@ class LeakOsintMod(loader.Module):
         await message.reply(self.strings["file_info"].format(file_name=file_name), file=f"output.{output_format}", caption="🔍 Результаты поиска")
 
     @loader.command()
-    async def setformat(self, message: str):
+    async def setformat(self, message):
         """Команда для настройки формата вывода данных"""
         format_choice = message.text.split(" ", 1)[1].lower()
 
