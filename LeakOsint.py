@@ -1,18 +1,20 @@
 # meta developer: @sunshinelzt
+# пися
 
 import asyncio
 import logging
 import random
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import aiohttp
 from telethon import events, Button
 from .. import loader, utils
 
+
 class LeakOsintMod(loader.Module):
     """Продвинутый OSINT модуль с расширенной безопасностью и функциональностью"""
-    
+
     strings = {
         "name": "LeakOsint",
         "no_access": "🚫 Доступ запрещен",
@@ -39,8 +41,7 @@ class LeakOsintMod(loader.Module):
         """Валидация поискового запроса"""
         if not query or len(query) < 2 or len(query) > 100:
             return False
-        
-        # Безопасный шаблон для поиска
+
         safe_pattern = re.compile(r'^[а-яА-ЯёЁa-zA-Z0-9\s\-\.]+$')
         return bool(safe_pattern.match(query))
 
@@ -49,20 +50,20 @@ class LeakOsintMod(loader.Module):
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    self.config["api_url"], 
-                    json=payload, 
+                    self.config["api_url"],
+                    json=payload,
                     timeout=aiohttp.ClientTimeout(total=self.config["timeout"])
                 ) as response:
                     if response.status != 200:
                         self.logger.error(f"API Error: {response.status}")
                         return {"error": f"HTTP {response.status}"}
-                    
+
                     return await response.json()
-        
+
         except asyncio.TimeoutError:
             self.logger.warning("API Request Timeout")
-            return {"error": self.strings["rate_limit"]}
-        
+            return {"error": self.strings['rate_limit']}
+
         except Exception as e:
             self.logger.error(f"API Request Error: {e}")
             return {"error": str(e)}
@@ -71,10 +72,10 @@ class LeakOsintMod(loader.Module):
     async def osint(self, message):
         """Выполнить OSINT-поиск"""
         query = utils.get_args_raw(message)
-        
+
         if not query:
             return await message.edit("❓ Укажите запрос для поиска")
-        
+
         if not await self._validate_query(query):
             return await message.edit("⚠️ Некорректный формат запроса")
 
@@ -82,7 +83,7 @@ class LeakOsintMod(loader.Module):
             return await message.edit(self.strings["invalid_token"])
 
         await message.edit(self.strings["working"].format(query=query))
-        
+
         payload = {
             "bot_name": self.config["bot_name"],
             "token": self.config["api_token"],
@@ -90,9 +91,9 @@ class LeakOsintMod(loader.Module):
             "limit": max(100, min(self.config["limit"], 10000)),
             "lang": self.config["lang"]
         }
-        
+
         response = await self._safe_api_request(payload)
-        
+
         if "error" in response:
             return await message.edit(self.strings["error"].format(error=response["error"]))
 
@@ -111,7 +112,7 @@ class LeakOsintMod(loader.Module):
             return await message.edit(self.strings["error"].format(error="Кэш отчётов пуст"))
 
         page = max(0, min(page, len(report_pages) - 1))
-        
+
         keyboard = [
             [
                 Button.inline("⬅️ Назад", f"osint_prev:{query_id}:{page-1}") if page > 0 else None,
@@ -119,26 +120,26 @@ class LeakOsintMod(loader.Module):
             ],
             [Button.inline("🗑️ Удалить", f"osint_delete:{query_id}")]
         ]
-        
-        # Фильтрация None из кнопок
+
+        # Убираем None из кнопок
         keyboard = [btn for btn in keyboard if any(btn)]
-        
+
         await message.edit(report_pages[page], buttons=keyboard, parse_mode="html")
 
-    @loader.callback("osint_prev", "osint_next")
-    async def _paginate(self, call):
-        """Постраничная навигация по результатам"""
-        _, query_id, page = call.data.decode().split(":")
-        page = int(page)
-        await self._send_report(call, query_id, page)
+    @loader.handler()
+    async def osint_callback(self, event):
+        """Обработка callback-кнопок"""
+        data = event.data.decode("utf-8")
 
-    @loader.callback("osint_delete")
-    async def _delete_report(self, call):
-        """Удаление кэша отчета"""
-        query_id = call.data.decode().split(":")[1]
-        if query_id in self.reports_cache:
-            del self.reports_cache[query_id]
-        await call.delete()
+        if data.startswith("osint_prev") or data.startswith("osint_next"):
+            _, query_id, page = data.split(":")
+            await self._send_report(event.message, query_id, int(page))
+
+        elif data.startswith("osint_delete"):
+            query_id = data.split(":")[1]
+            if query_id in self.reports_cache:
+                del self.reports_cache[query_id]
+            await event.message.delete()
 
     def _format_reports(self, response: Dict) -> List[str]:
         """Форматирование результатов поиска"""
@@ -157,7 +158,7 @@ class LeakOsintMod(loader.Module):
                 details.append(record_info)
 
             full_report = header + leak_info + "\n\n".join(details)
-            
+
             # Разбиение длинных отчетов на части
             for chunk in self._split_long_message(full_report):
                 formatted_reports.append(chunk)
@@ -166,4 +167,4 @@ class LeakOsintMod(loader.Module):
 
     def _split_long_message(self, text: str, max_length: int = 4000) -> List[str]:
         """Разделение длинных сообщений на части"""
-        return [text[i:i+max_length] for i in range(0, len(text), max_length)]
+        return [text[i:i + max_length] for i in range(0, len(text), max_length)]
