@@ -1,14 +1,12 @@
 # meta developer: @sunshinelzt
-# пися
+# писядва
 
 import asyncio
 import logging
-import random
 import re
 from typing import Dict, List
 
 import aiohttp
-from telethon import events, Button
 from .. import loader, utils
 
 
@@ -17,36 +15,36 @@ class LeakOsintMod(loader.Module):
 
     strings = {
         "name": "LeakOsint",
-        "no_access": "🚫 Доступ запрещен",
-        "working": "🔍 Поиск по запросу: <b>{query}</b>",
+        "working": "🔍 Выполняется поиск по запросу: <b>{query}</b>",
         "no_results": "❌ Ничего не найдено по запросу: <b>{query}</b>",
         "error": "⚠️ Ошибка: {error}",
         "invalid_token": "🔒 Некорректный API-токен",
-        "rate_limit": "⏳ Превышен лимит запросов"
+        "rate_limit": "⏳ Превышен лимит запросов",
     }
+
+    IMPORTANT_FIELDS = ["email", "phone", "password", "login", "ip", "address"]
 
     def __init__(self):
         self.config = loader.ModuleConfig(
             "bot_name", "@YouLeakOsint_bot", "Имя бота для API",
-            "api_token", "", "API-токен",
-            "api_url", "https://leakosintapi.com/", "URL API",
-            "limit", 100, "Лимит результатов (100-10000)",
-            "lang", "ru", "Язык результатов",
-            "timeout", 30, "Время ожидания запроса (сек)"
+            "api_token", "", "API-токен для доступа к LeakOsint",
+            "api_url", "https://leakosintapi.com/", "URL API для запросов",
+            "limit", 200, "Максимальное количество результатов (100-10000)",
+            "lang", "ru", "Язык ответа от API",
+            "timeout", 30, "Таймаут запроса (в секундах)"
         )
-        self.reports_cache = {}
         self.logger = logging.getLogger(self.__class__.__name__)
 
     async def _validate_query(self, query: str) -> bool:
-        """Валидация поискового запроса"""
+        """Проверка корректности поискового запроса"""
         if not query or len(query) < 2 or len(query) > 100:
             return False
-
+        # Разрешены только буквы, цифры, пробелы, точки и дефисы
         safe_pattern = re.compile(r'^[а-яА-ЯёЁa-zA-Z0-9\s\-\.]+$')
         return bool(safe_pattern.match(query))
 
-    async def _safe_api_request(self, payload: Dict) -> Dict:
-        """Безопасный асинхронный запрос к API"""
+    async def _api_request(self, payload: Dict) -> Dict:
+        """Выполнение безопасного асинхронного запроса к API"""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -62,7 +60,7 @@ class LeakOsintMod(loader.Module):
 
         except asyncio.TimeoutError:
             self.logger.warning("API Request Timeout")
-            return {"error": self.strings['rate_limit']}
+            return {"error": self.strings["rate_limit"]}
 
         except Exception as e:
             self.logger.error(f"API Request Error: {e}")
@@ -70,7 +68,7 @@ class LeakOsintMod(loader.Module):
 
     @loader.command()
     async def osint(self, message):
-        """Выполнить OSINT-поиск"""
+        """Выполнить OSINT-поиск по утечкам"""
         query = utils.get_args_raw(message)
 
         if not query:
@@ -89,10 +87,10 @@ class LeakOsintMod(loader.Module):
             "token": self.config["api_token"],
             "request": query,
             "limit": max(100, min(self.config["limit"], 10000)),
-            "lang": self.config["lang"]
+            "lang": self.config["lang"],
         }
 
-        response = await self._safe_api_request(payload)
+        response = await self._api_request(payload)
 
         if "error" in response:
             return await message.edit(self.strings["error"].format(error=response["error"]))
@@ -100,71 +98,54 @@ class LeakOsintMod(loader.Module):
         if not response.get("List") or "No results found" in response["List"]:
             return await message.edit(self.strings["no_results"].format(query=query))
 
-        query_id = str(random.randint(1000, 9999))
-        self.reports_cache[query_id] = self._format_reports(response)
+        formatted_report = self._format_reports(response)
 
-        await self._send_report(message, query_id, 0)
+        if not formatted_report:
+            return await message.edit(self.strings["no_results"].format(query=query))
 
-    async def _send_report(self, message, query_id, page):
-        """Отправка страницы отчета с навигацией"""
-        report_pages = self.reports_cache.get(query_id, [])
-        if not report_pages:
-            return await message.edit(self.strings["error"].format(error="Кэш отчётов пуст"))
+        await self._send_report(message, formatted_report)
 
-        page = max(0, min(page, len(report_pages) - 1))
+    async def _send_report(self, message, report):
+        """Отправка отчета с разбиением на части"""
+        report_chunks = self._split_long_message(report)
 
-        keyboard = [
-            [
-                Button.inline("⬅️ Назад", f"osint_prev:{query_id}:{page-1}") if page > 0 else None,
-                Button.inline("➡️ Вперёд", f"osint_next:{query_id}:{page+1}") if page < len(report_pages) - 1 else None
-            ],
-            [Button.inline("🗑️ Удалить", f"osint_delete:{query_id}")]
-        ]
+        for chunk in report_chunks:
+            await message.respond(chunk, parse_mode="html")
 
-        # Убираем None из кнопок
-        keyboard = [btn for btn in keyboard if any(btn)]
-
-        await message.edit(report_pages[page], buttons=keyboard, parse_mode="html")
-
-    @loader.handler()
-    async def osint_callback(self, event):
-        """Обработка callback-кнопок"""
-        data = event.data.decode("utf-8")
-
-        if data.startswith("osint_prev") or data.startswith("osint_next"):
-            _, query_id, page = data.split(":")
-            await self._send_report(event.message, query_id, int(page))
-
-        elif data.startswith("osint_delete"):
-            query_id = data.split(":")[1]
-            if query_id in self.reports_cache:
-                del self.reports_cache[query_id]
-            await event.message.delete()
-
-    def _format_reports(self, response: Dict) -> List[str]:
-        """Форматирование результатов поиска"""
-        formatted_reports = []
+    def _format_reports(self, response: Dict) -> str:
+        """Форматирование отчета в сжатом и удобочитаемом виде"""
+        report_parts = []
 
         for db_name, db_data in response.get("List", {}).items():
             if db_name == "No results found":
                 continue
 
-            header = f"<b>📊 База данных: {db_name}</b>\n\n"
-            leak_info = f"🗂️ <u>{db_data.get('InfoLeak', 'Информация о leaked данных')}</u>\n\n"
+            header = f"📊 <b>{db_name}</b>\n"
+            leak_info = f"🗂️ <i>{db_data.get('InfoLeak', 'Информация отсутствует')}</i>\n\n"
 
             details = []
             for record in db_data.get("Data", []):
-                record_info = "\n".join(f"🔹 <b>{key}</b>: {value}" for key, value in record.items())
-                details.append(record_info)
+                # Извлекаем только важные поля
+                important_data = {
+                    key: value for key, value in record.items()
+                    if key.lower() in self.IMPORTANT_FIELDS
+                }
 
-            full_report = header + leak_info + "\n\n".join(details)
+                if important_data:
+                    record_info = "\n".join(f"🔹 <b>{key.capitalize()}</b>: {value}"
+                                            for key, value in important_data.items())
+                    details.append(record_info)
 
-            # Разбиение длинных отчетов на части
-            for chunk in self._split_long_message(full_report):
-                formatted_reports.append(chunk)
+            if details:
+                report_parts.append(f"{header}{leak_info}\n" + "\n\n".join(details) + "\n")
 
-        return formatted_reports
+        if not report_parts:
+            return ""
 
-    def _split_long_message(self, text: str, max_length: int = 4000) -> List[str]:
-        """Разделение длинных сообщений на части"""
+        # Соединяем отчет и ограничиваем длину
+        full_report = "\n".join(report_parts)
+        return full_report[:10000]
+
+    def _split_long_message(self, text: str, max_length: int = 4096) -> List[str]:
+        """Разбиение длинных сообщений на части"""
         return [text[i:i + max_length] for i in range(0, len(text), max_length)]
