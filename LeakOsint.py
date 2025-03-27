@@ -1,142 +1,165 @@
 # meta developer: @sunshinelzt
-# писядвапис
-
-import asyncio
-import logging
-from typing import Dict, List
+# писядвапися
 
 import aiohttp
-from .. import loader, utils
-
+import json
+from telethon import events, Button
+from .. import loader
+import os
 
 class LeakOsintMod(loader.Module):
-    """Расширенный OSINT модуль для поиска любых утечек"""
+    """Модуль для обработки и вывода данных с дополнительной информацией и улучшенным оформлением"""
 
     strings = {
         "name": "LeakOsint",
-        "working": "🔍 Выполняется поиск по запросу: <b>{query}</b>",
-        "no_results": "❌ Ничего не найдено по запросу: <b>{query}</b>",
-        "error": "⚠️ Ошибка: {error}",
-        "invalid_token": "🔒 Некорректный API-токен",
-        "rate_limit": "⏳ Превышен лимит запросов",
+        "working": "🔍 <b>Поиск по запросу:</b> <i>{query}</i>",
+        "no_results": "❌ <b>Ничего не найдено по запросу:</b> <i>{query}</i>",
+        "error": "⚠️ <b>Ошибка:</b> {error}",
+        "rate_limit": "⏳ <b>Превышен лимит запросов, попробуйте позже.</b>",
+        "invalid_token": "🔒 <b>Некорректный API-токен, проверьте настройки.</b>",
+        "no_query": "❌ Пожалуйста, укажите запрос для поиска.",
+        "data_found": "✅ <b>Данные найдены:</b> <i>{count}</i> результатов.",
+        "choose_format": "🎨 💬 <b>Выберите формат вывода данных:</b>",
+        "format_changed": "✅ <b>Формат вывода успешно изменён на:</b> <b>{format}</b>",
+        "user_info": "👤 <b>Искомый пользователь:</b> {user}",
+        "query_info": "🔍 <b>Запрос:</b> {query}",
+        "data_info": "📊 <b>Количество найденных данных:</b> <i>{count}</i>",
+        "file_info": "📁 <b>Файл с результатами готов:</b> {file_name}",
     }
 
-    IMPORTANT_FIELDS = [
-        "email", "phone", "password", "login", "ip", "address",
-        "username", "card", "hash", "birthdate", "token", "domain"
-    ]
-
     def __init__(self):
-        self.config = loader.ModuleConfig(
-            "bot_name", "@YouLeakOsint_bot", "Имя бота для API",
-            "api_token", "", "API-токен для доступа к LeakOsint",
-            "api_url", "https://leakosintapi.com/", "URL API для запросов",
-            "limit", 500, "Максимальное количество результатов (100-10000)",
-            "lang", "ru", "Язык ответа от API",
-            "timeout", 40, "Таймаут запроса (в секундах)"
-        )
-        self.logger = logging.getLogger(self.__class__.__name__)
-
-    async def _api_request(self, payload: Dict) -> Dict:
-        """Выполнение безопасного асинхронного запроса к API"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.config["api_url"],
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=self.config["timeout"])
-                ) as response:
-                    if response.status != 200:
-                        self.logger.error(f"API Error: {response.status}")
-                        return {"error": f"HTTP {response.status}"}
-
-                    return await response.json()
-
-        except asyncio.TimeoutError:
-            self.logger.warning("API Request Timeout")
-            return {"error": self.strings["rate_limit"]}
-
-        except Exception as e:
-            self.logger.error(f"API Request Error: {e}")
-            return {"error": str(e)}
-
-    @loader.command()
-    async def osint(self, message):
-        """Выполнить OSINT-поиск по любому запросу"""
-        query = utils.get_args_raw(message)
-
-        if not query:
-            return await message.edit("❓ Укажите запрос для поиска")
-
-        if not self.config["api_token"]:
-            return await message.edit(self.strings["invalid_token"])
-
-        await message.edit(self.strings["working"].format(query=query))
-
-        payload = {
-            "bot_name": self.config["bot_name"],
-            "token": self.config["api_token"],
-            "request": query,
-            "limit": max(100, min(self.config["limit"], 10000)),
-            "lang": self.config["lang"],
+        # Настройки
+        self.config = {
+            "api_url": "https://your.api/endpoint",  # Замените на ваш API-URL
+            "api_key": "your_api_key_here",  # Ваш API ключ
+            "output_format": "html",  # Формат вывода по умолчанию: html
         }
 
-        response = await self._api_request(payload)
+    async def _safe_api_request(self, payload: dict) -> dict:
+        """Безопасный асинхронный запрос к API"""
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.config['api_key']}",
+                "Content-Type": "application/json"
+            }
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.config["api_url"], json=payload, headers=headers) as response:
+                    if response.status != 200:
+                        return {"error": f"HTTP {response.status}"}
+                    return await response.json()
+        except Exception as e:
+            return {"error": str(e)}
 
-        if "error" in response:
-            return await message.edit(self.strings["error"].format(error=response["error"]))
+    async def _format_as_html(self, data: dict, query: str, user: str, result_count: int) -> str:
+        """Форматирует данные в HTML с добавлением информации о запросе и улучшенным оформлением"""
+        html_content = f"<html><body style='font-family: Arial, sans-serif; color: #333; background-color: #f4f4f4; padding: 20px;'>"
+        html_content += f"<h1 style='color: #4CAF50; text-align: center;'>🔍 <u>Результаты поиска</u></h1>"
+        html_content += f"<p style='font-size: 16px;'>🎯 <b>Запрос:</b> {query}</p>"
+        html_content += f"<p style='font-size: 16px;'>👤 <b>Искомый пользователь:</b> {user}</p>"
+        html_content += f"<p style='font-size: 16px;'>📊 <b>Количество найденных данных:</b> {result_count}</p>"
+        html_content += "<ul style='list-style: none; padding: 0; font-size: 14px;'>"
+        
+        for key, value in data.items():
+            if isinstance(value, str) and len(value) > 5:  # Выводим строки
+                html_content += f"<li style='padding: 8px; margin-bottom: 6px; background: #e7f9e7; border-radius: 5px;'>"
+                html_content += f"<b>{key.capitalize()}:</b> <i>{value}</i></li>"
+        
+        html_content += "</ul><br><hr>"
+        html_content += "<footer style='text-align: center; font-size: 14px; color: #888;'>"
+        html_content += "© 2025 LeakOsint. Все права защищены.</footer></body></html>"
+        return html_content
 
-        if not response.get("List") or "No results found" in response["List"]:
-            return await message.edit(self.strings["no_results"].format(query=query))
+    async def _format_as_json(self, data: dict, query: str, user: str, result_count: int) -> str:
+        """Форматирует данные в JSON с добавлением информации о запросе"""
+        result = {
+            "query": query,
+            "user": user,
+            "result_count": result_count,
+            "data": data
+        }
+        return json.dumps(result, indent=4, ensure_ascii=False)
 
-        formatted_report = self._format_reports(response)
+    async def _format_as_txt(self, data: dict, query: str, user: str, result_count: int) -> str:
+        """Форматирует данные в TXT с добавлением информации о запросе"""
+        txt_content = f"🔍 Запрос: {query}\n"
+        txt_content += f"👤 Искомый пользователь: {user}\n"
+        txt_content += f"📊 Количество найденных данных: {result_count}\n\n"
+        
+        for key, value in data.items():
+            if isinstance(value, str) and len(value) > 5:  # Выводим строки
+                txt_content += f"{key.capitalize()}: {value}\n"
+        
+        return txt_content
 
-        if not formatted_report:
-            return await message.edit(self.strings["no_results"].format(query=query))
+    async def _generate_buttons(self, data: dict) -> list:
+        """Генерирует кнопки для каждого типа данных с красивым оформлением"""
+        buttons = []
+        for key, value in data.items():
+            if isinstance(value, str) and len(value) > 5:  # Для данных типа строки
+                buttons.append([Button.inline(f"📋 {key.capitalize()}: {value[:20]}...", data=key)])
+        buttons.append([Button.inline("🔎 Получить все данные", data="all_data")])
+        return buttons
 
-        await self._send_report(message, formatted_report)
+    @loader.command()
+    async def leak(self, message: str):
+        """Команда для поиска информации по запросу"""
+        query = message.text.split(" ", 1)[1]
 
-    async def _send_report(self, message, report):
-        """Отправка отчета с разбиением на части"""
-        report_chunks = self._split_long_message(report)
+        if not query:
+            await message.reply(self.strings["no_query"])
+            return
 
-        for chunk in report_chunks:
-            await message.respond(chunk, parse_mode="html")
+        # Получаем данные о пользователе
+        user = message.sender.username if message.sender.username else message.sender.id
+        
+        # Формат по умолчанию
+        output_format = self.config["output_format"]
+        
+        # Делаем запрос
+        payload = {"query": query}
+        data = await self._safe_api_request(payload)
 
-    def _format_reports(self, response: Dict) -> str:
-        """Форматирование отчета с важной информацией в сжатом виде"""
-        report_parts = []
+        if "error" in data:
+            await message.reply(self.strings["error"].format(error=data["error"]))
+            return
 
-        for db_name, db_data in response.get("List", {}).items():
-            if db_name == "No results found":
-                continue
+        # Получаем количество данных
+        result_count = len(data)
 
-            header = f"📊 <b>{db_name}</b>\n"
-            leak_info = f"🗂️ <i>{db_data.get('InfoLeak', 'Информация отсутствует')}</i>\n\n"
+        # Форматируем данные в нужном формате
+        if output_format == "html":
+            formatted_data = await self._format_as_html(data, query, user, result_count)
+        elif output_format == "json":
+            formatted_data = await self._format_as_json(data, query, user, result_count)
+        elif output_format == "txt":
+            formatted_data = await self._format_as_txt(data, query, user, result_count)
 
-            details = []
-            for record in db_data.get("Data", []):
-                # Фильтруем только важные данные
-                important_data = {
-                    key: value for key, value in record.items()
-                    if key.lower() in self.IMPORTANT_FIELDS and value
-                }
+        # Отправляем информацию в чат о том, кого искали, сколько данных найдено
+        await message.reply(self.strings["query_info"].format(query=query))
+        await message.reply(self.strings["user_info"].format(user=user))
+        await message.reply(self.strings["data_info"].format(count=result_count))
 
-                if important_data:
-                    formatted_data = "\n".join(f"🔹 <b>{key.capitalize()}</b>: {value}"
-                                               for key, value in important_data.items())
-                    details.append(formatted_data)
+        # Генерация кнопок
+        buttons = await self._generate_buttons(data)
+        await message.reply(self.strings["choose_format"], buttons=buttons)
 
-            if details:
-                report_parts.append(f"{header}{leak_info}\n" + "\n\n".join(details) + "\n")
+        # Сохраняем данные в файл
+        file_name = f"output.{output_format}"
+        with open(file_name, "w", encoding="utf-8") as f:
+            f.write(formatted_data)
 
-        if not report_parts:
-            return ""
+        # Отправляем файл
+        await message.reply(self.strings["file_info"].format(file_name=file_name), file=f"output.{output_format}", caption="🔍 Результаты поиска")
 
-        # Форматируем отчет в сжатом виде
-        full_report = "\n".join(report_parts)
-        return full_report[:15000]
+    @loader.command()
+    async def setformat(self, message: str):
+        """Команда для настройки формата вывода данных"""
+        format_choice = message.text.split(" ", 1)[1].lower()
 
-    def _split_long_message(self, text: str, max_length: int = 4096) -> List[str]:
-        """Разбиение длинных сообщений на части"""
-        return [text[i:i + max_length] for i in range(0, len(text), max_length)]
+        if format_choice not in ["html", "json", "txt"]:
+            await message.reply("❌ Неверный формат. Доступные форматы: html, json, txt.")
+            return
+
+        # Сохраняем выбранный формат
+        self.config["output_format"] = format_choice
+        await message.reply(self.strings["format_changed"].format(format=format_choice.upper()))
