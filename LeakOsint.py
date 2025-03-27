@@ -1,10 +1,10 @@
 # meta developer: @sunshinelzt
-# писядваписяп
+# писядвапися
 
 import aiohttp
 import json
-from telethon import events, Button
-from .. import loader
+from telethon import Button
+from hikka import loader
 import os
 
 class LeakOsintMod(loader.Module):
@@ -103,14 +103,14 @@ class LeakOsintMod(loader.Module):
     @loader.command()
     async def leak(self, message):
         """Команда для поиска информации по запросу"""
-        query = message.text.split(" ", 1)[1] if len(message.text.split(" ", 1)) > 1 else None
+        query = message.text.split(" ", 1)[1]
 
         if not query:
             await message.reply(self.strings["no_query"])
             return
 
         # Получаем данные о пользователе
-        user = message.sender.username if message.sender.username else str(message.sender.id)
+        user = message.sender.username if message.sender.username else message.sender.id
         
         # Формат по умолчанию
         output_format = self.config["output_format"]
