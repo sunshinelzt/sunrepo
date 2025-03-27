@@ -1,5 +1,5 @@
 # meta developer: @sunshinelzt
-# писядвапися
+# писядвапис
 
 import asyncio
 import logging
@@ -104,7 +104,7 @@ class LeakOsintMod(loader.Module):
             await message.respond(chunk, parse_mode="html")
 
     def _format_reports(self, response: Dict) -> str:
-        """Форматирование отчета с важной информацией"""
+        """Форматирование отчета с важной информацией в сжатом виде"""
         report_parts = []
 
         for db_name, db_data in response.get("List", {}).items():
@@ -123,9 +123,9 @@ class LeakOsintMod(loader.Module):
                 }
 
                 if important_data:
-                    record_info = "\n".join(f"🔹 <b>{key.capitalize()}</b>: {value}"
-                                            for key, value in important_data.items())
-                    details.append(record_info)
+                    formatted_data = "\n".join(f"🔹 <b>{key.capitalize()}</b>: {value}"
+                                               for key, value in important_data.items())
+                    details.append(formatted_data)
 
             if details:
                 report_parts.append(f"{header}{leak_info}\n" + "\n\n".join(details) + "\n")
@@ -133,7 +133,7 @@ class LeakOsintMod(loader.Module):
         if not report_parts:
             return ""
 
-        # Соединяем отчет и ограничиваем длину
+        # Форматируем отчет в сжатом виде
         full_report = "\n".join(report_parts)
         return full_report[:15000]
 
