@@ -1,9 +1,12 @@
 # meta developer: @sunshinelzt
 # scope: hikka_min 1.6.0
+# requires: requests
 
 import asyncio
 import logging
 import re
+import typing
+import json
 from typing import List, Dict, Any
 
 import requests
@@ -15,20 +18,27 @@ from ..inline.types import InlineQuery, InlineResult
 
 logger = logging.getLogger(__name__)
 
+def safe_json_loads(data: str) -> Dict:
+    """Безопасная загрузка JSON"""
+    try:
+        return json.loads(data)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+
 @loader.tds
-class LeakOsintMod(loader.Module):
-    """🕵️ Продвинутый модуль для глубокого поиска информации с LeakOsint"""
+class AdvancedLeakOsintMod(loader.Module):
+    """<emoji document_id=5453862417215803155>💻</emoji> Продвинутый модуль для глубокого поиска информации"""
 
     strings = {
-        "name": "🔍 LeakOsint",
-        "no_args": "❌ Вы не указали запрос для поиска",
-        "processing": "🌪️ Начинаю глубокий анализ...",
-        "error": "❗ Критическая ошибка при выполнении запроса: {}",
-        "no_results": "🚫 Информация не найдена. Возможно, стоит уточнить запрос.",
-        "token_not_set": "🔒 API токен не установлен. Настройте через .osintconfig",
-        "config_updated": "✅ Конфигурация успешно обновлена",
-        "search_history": "📜 История поиска очищена",
-        "rate_limit": "⏳ Превышен лимит запросов. Подождите немного."
+        "name": "<emoji document_id=5454249518323222262>📊</emoji> LeakOsint Pro",
+        "no_args": "<emoji document_id=5453972364083614390>❗️</emoji> Вы не указали запрос для поиска",
+        "processing": "<emoji document_id=5454071693792267761>🔥</emoji> Начинаю глубокий анализ...",
+        "error": "<emoji document_id=5453972364083614390>❗️</emoji> Критическая ошибка при выполнении запроса: {}",
+        "no_results": "<emoji document_id=5453914472219431554>📄</emoji> Информация не найдена. Возможно, стоит уточнить запрос.",
+        "token_not_set": "<emoji document_id=5451611974611781917>📝</emoji> API токен не установлен. Настройте через .osintconfig",
+        "config_updated": "<emoji document_id=5454137273647912913>🎁</emoji> Конфигурация успешно обновлена",
+        "search_history": "<emoji document_id=5453886782565272984>🔙</emoji> История поиска очищена",
+        "rate_limit": "<emoji document_id=5454261548526622388>⚙️</emoji> Превышен лимит запросов. Подождите немного."
     }
 
     def __init__(self):
@@ -36,25 +46,25 @@ class LeakOsintMod(loader.Module):
             loader.ConfigValue(
                 "api_token", 
                 None, 
-                lambda: "🔑 API токен LeakOsint",
+                lambda: "<emoji document_id=5454221227373645916>🔖</emoji> API токен LeakOsint",
                 validator=loader.validators.String()
             ),
             loader.ConfigValue(
                 "default_limit", 
                 300, 
-                lambda: "🔢 Максимальный лимит поиска",
+                lambda: "<emoji document_id=5452088170520791411>🖲</emoji> Максимальный лимит поиска",
                 validator=loader.validators.Integer(minimum=100, maximum=10000)
             ),
             loader.ConfigValue(
                 "default_lang", 
                 "ru", 
-                lambda: "🌐 Язык результатов",
+                lambda: "<emoji document_id=5453982431486955842>📅</emoji> Язык результатов",
                 validator=loader.validators.Choice(["ru", "en"])
             ),
             loader.ConfigValue(
                 "max_depth", 
                 3, 
-                lambda: "🕳️ Глубина поиска (количество перекрестных источников)",
+                lambda: "<emoji document_id=5454091673980132816>🧬</emoji> Глубина поиска",
                 validator=loader.validators.Integer(minimum=1, maximum=5)
             )
         )
@@ -63,66 +73,7 @@ class LeakOsintMod(loader.Module):
         self._rate_limit_counter = 0
         self._error_log = []
 
-    async def client_ready(self, client, db):
-        self._client = client
-        self.inline_handler = self.create_inline_handler()
-
-    def create_inline_handler(self):
-        """Создание инлайн-хендлера для расширенного поиска"""
-        @loader.inline_handler(func=lambda self, query: query.startswith('osint_'))
-        async def handler(self, query: InlineQuery):
-            try:
-                search_type = query.split('_')[1]
-                if search_type == 'advanced':
-                    return await self._advanced_search_inline(query)
-            except Exception as e:
-                return [InlineResult(
-                    id=query,
-                    title="Ошибка инлайн-поиска",
-                    description=str(e),
-                    thumb="https://img.icons8.com/fluency/48/error.png"
-                )]
-
-        return handler
-
-    async def _advanced_search_inline(self, query: str) -> List[InlineResult]:
-        """Расширенный инлайн-поиск с предварительным анализом"""
-        query_text = query.split('advanced ', 1)[1].strip()
-        
-        # Предварительный анализ запроса
-        query_analysis = self._analyze_query(query_text)
-        
-        return [
-            InlineResult(
-                id=query,
-                title=f"🔎 Поиск: {query_text}",
-                description=f"Тип: {query_analysis['type']}, Сложность: {query_analysis['complexity']}",
-                thumb="https://img.icons8.com/fluency/48/search.png"
-            )
-        ]
-
-    def _analyze_query(self, query: str) -> Dict[str, Any]:
-        """Предварительный анализ запроса"""
-        # Определение типа запроса
-        query_type = 'unknown'
-        if re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', query):
-            query_type = 'email'
-        elif re.match(r'^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$', query):
-            query_type = 'phone'
-        elif re.match(r'^[A-Za-zА-Яа-я]+ [A-Za-zА-Яа-я]+', query):
-            query_type = 'name'
-        
-        # Оценка сложности
-        words = query.split()
-        complexity = min(max(len(words) * 5, 1), 40)
-        
-        return {
-            'type': query_type,
-            'complexity': complexity,
-            'words_count': len(words)
-        }
-
-    @loader.command(ru_doc="🔐 Настройка конфигурации LeakOsint")
+    @loader.command(ru_doc="<emoji document_id=5454160256017912961>📮</emoji> Настройка конфигурации LeakOsint")
     async def osintconfig(self, message):
         """Расширенная настройка модуля"""
         args = utils.get_args_raw(message)
@@ -130,11 +81,11 @@ class LeakOsintMod(loader.Module):
         if not args:
             # Показ текущей конфигурации
             config_text = (
-                "🛠️ <b>Текущая конфигурация LeakOsint:</b>\n\n"
-                f"🔑 API Токен: {'✅ Установлен' if self.config['api_token'] else '❌ Не установлен'}\n"
-                f"🔢 Лимит поиска: {self.config['default_limit']}\n"
-                f"🌐 Язык: {self.config['default_lang']}\n"
-                f"🕳️ Глубина поиска: {self.config['max_depth']}"
+                "<emoji document_id=5451958870530346105>❤️</emoji> <b>Текущая конфигурация LeakOsint:</b>\n\n"
+                f"<emoji document_id=5454221227373645916>🔖</emoji> API Токен: {'✅ Установлен' if self.config['api_token'] else '❌ Не установлен'}\n"
+                f"<emoji document_id=5452088170520791411>🖲</emoji> Лимит поиска: {self.config['default_limit']}\n"
+                f"<emoji document_id=5453982431486955842>📅</emoji> Язык: {self.config['default_lang']}\n"
+                f"<emoji document_id=5454091673980132816>🧬</emoji> Глубина поиска: {self.config['max_depth']}"
             )
             return await utils.answer(message, config_text)
 
@@ -150,13 +101,13 @@ class LeakOsintMod(loader.Module):
             elif key == 'depth':
                 self.config['max_depth'] = int(value)
             else:
-                return await utils.answer(message, "❌ Неверный параметр конфигурации")
+                return await utils.answer(message, "<emoji document_id=5453972364083614390>❗️</emoji> Неверный параметр конфигурации")
             
             await utils.answer(message, self.strings["config_updated"])
         except Exception as e:
-            await utils.answer(message, f"❌ Ошибка настройки: {str(e)}")
+            await utils.answer(message, f"<emoji document_id=5453972364083614390>❗️</emoji> Ошибка настройки: {str(e)}")
 
-    @loader.command(ru_doc="🔍 Расширенный поиск информации")
+    @loader.command(ru_doc="<emoji document_id=5454249518323222262>📊</emoji> Расширенный поиск информации")
     async def osint(self, message):
         """Продвинутый поиск через LeakOsint"""
         args = utils.get_args_raw(message)
@@ -202,13 +153,17 @@ class LeakOsintMod(loader.Module):
             "lang": self.config['default_lang']
         }
         
-        async with self._client.request('POST', url, json=data) as resp:
-            return await resp.json()
+        try:
+            async with self._client.request('POST', url, json=data) as resp:
+                return await resp.json()
+        except Exception as e:
+            logger.error(f"API Request Error: {e}")
+            raise
 
     async def _format_and_send_results(self, message, response):
         """Красивое форматирование и отправка результатов"""
         if "Error code" in response:
-            return await utils.answer(message, f"❌ Ошибка API: {response.get('Error code', 'Неизвестная ошибка')}")
+            return await utils.answer(message, f"<emoji document_id=5453972364083614390>❗️</emoji> Ошибка API: {response.get('Error code', 'Неизвестная ошибка')}")
 
         results = response.get("List", {})
         
@@ -220,8 +175,8 @@ class LeakOsintMod(loader.Module):
             if db_name == "No results found":
                 continue
 
-            db_section = f"🌐 <b>{db_name}</b>\n"
-            db_section += f"📋 {db_info.get('InfoLeak', 'Без дополнительной информации')}\n\n"
+            db_section = f"<emoji document_id=5454172810207318529>🗂</emoji> <b>{db_name}</b>\n"
+            db_section += f"<emoji document_id=5453914472219431554>📄</emoji> {db_info.get('InfoLeak', 'Без дополнительной информации')}\n\n"
 
             for entry in db_info.get("Data", []):
                 entry_details = []
@@ -241,17 +196,17 @@ class LeakOsintMod(loader.Module):
         """Подбор эмодзи в зависимости от типа данных"""
         key_lower = key.lower()
         if 'email' in key_lower:
-            return '✉️'
+            return '<emoji document_id=5453935118127222895>📩</emoji>'
         elif 'phone' in key_lower or 'tel' in key_lower:
-            return '📱'
+            return '<emoji document_id=5454113616968045758>👫</emoji>'
         elif 'name' in key_lower:
-            return '👤'
+            return '<emoji document_id=5454295616207213193>👨‍👩‍👧‍👦</emoji>'
         elif 'address' in key_lower:
-            return '🏠'
+            return '<emoji document_id=5454407706263701910>🛒</emoji>'
         elif 'date' in key_lower:
-            return '📅'
+            return '<emoji document_id=5453982431486955842>📅</emoji>'
         else:
-            return '🔹'
+            return '<emoji document_id=5454221227373645916>🔖</emoji>'
 
     async def _send_long_message(self, chat_id, text, max_length=4096):
         """Отправляет длинные сообщения частями"""
@@ -260,23 +215,23 @@ class LeakOsintMod(loader.Module):
             await self._client.send_message(chat_id, chunk, parse_mode='html')
             text = text[max_length:]
 
-    @loader.command(ru_doc="📜 История поиска")
+    @loader.command(ru_doc="<emoji document_id=5453914472219431554>📄</emoji> История поиска")
     async def osinthistory(self, message):
         """Показать историю поисковых запросов"""
         if not self._search_history:
-            return await utils.answer(message, "🕳️ История поиска пуста")
+            return await utils.answer(message, "<emoji document_id=5454172810207318529>🗂</emoji> История поиска пуста")
         
-        history_text = "🔍 <b>История поиска:</b>\n\n"
+        history_text = "<emoji document_id=5454249518323222262>📊</emoji> <b>История поиска:</b>\n\n"
         for entry in self._search_history[-10:]:  # Последние 10 записей
             history_text += (
-                f"🕰️ {utils.format_time(entry['timestamp'])}\n"
-                f"🔎 Запрос: {entry['query']}\n"
-                f"📊 Результатов: {entry['results_count']}\n\n"
+                f"<emoji document_id=5453982431486955842>📅</emoji> {utils.format_time(entry['timestamp'])}\n"
+                f"<emoji document_id=5454221227373645916>🔖</emoji> Запрос: {entry['query']}\n"
+                f"<emoji document_id=5453914472219431554>📄</emoji> Результатов: {entry['results_count']}\n\n"
             )
         
         await utils.answer(message, history_text)
 
-    @loader.command(ru_doc="🧹 Очистить историю")
+    @loader.command(ru_doc="<emoji document_id=5453886782565272984>🔙</emoji> Очистить историю")
     async def osintclear(self, message):
         """Очистить историю поиска и логи ошибок"""
         self._search_history.clear()
