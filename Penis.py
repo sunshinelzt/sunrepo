@@ -1,174 +1,251 @@
-# членикииипенис1
-
-import aiohttp
-import asyncio
-import logging
-from telethon.tl.types import Message
-from telethon.errors import MessageNotModifiedError
+# членикииипенис123
 
 from .. import loader, utils
+import logging
+import aiohttp
+from telethon.tl.types import Message
+from typing import Dict, Any, Union, List, Tuple
+import asyncio
 
 logger = logging.getLogger(__name__)
 
+
 @loader.tds
-class LolzLiveMod(loader.Module):
-    """Модуль для работы с API Lolz.live (Zelenka.guru)"""
+class LolzLiveAPIMod(loader.Module):
+    """Модуль для взаимодействия с API Lolz.live (Zelenka.guru)"""
 
     strings = {
-        "name": "LolzLive",
-        "api_error": "❌ Ошибка API: <code>{}</code>",
-        "profile_not_found": "❌ Пользователь <b>{}</b> не найден!",
-        "invalid_amount": "❌ Некорректная сумма!",
-        "transfer_confirm": (
-            "💸 <b>Подтверждение перевода</b>\n\n"
-            "🔹 Получатель: {user}\n"
-            "💰 Сумма: <code>{amount}</code>₽\n"
-            "📜 Комментарий: <code>{comment}</code>\n\n"
-            "⚠️ Проверьте данные перед подтверждением!"
-        ),
-        "transfer_success": (
-            "✅ <b>Перевод выполнен!</b>\n\n"
-            "🔹 Получатель: {user}\n"
-            "💰 Сумма: <code>{amount}</code>₽\n"
-            "📜 Комментарий: <code>{comment}</code>"
-        ),
-        "transfer_cancelled": "🚫 Перевод отменён!",
-        "transfer_failed": "❌ Ошибка при переводе: <code>{}</code>"
+        "name": "LolzLiveAPI",
+        "api_key_error": "❌ <b>API ключ не установлен!</b>\nУстановите его через команду <code>.lolzapi</code>",
+        "api_key_set": "✅ <b>API ключ установлен успешно!</b>",
+        "user_not_found": "❌ <b>Пользователь не найден!</b>",
+        "transfer_success": "✅ <b>Перевод успешно выполнен!</b>",
+        "invalid_amount": "❌ <b>Неверная сумма перевода!</b>",
+        "api_error": "❌ <b>Ошибка API:</b> {}",
+        "no_username": "❌ <b>Укажите имя пользователя!</b>",
+        "transfer_confirmation": """💸 <b>Подтверждение перевода</b>
+🔹 Получатель: @{}
+💰 Сумма: {}₽
+📜 Комментарий: "{}"
+
+⚠️ Проверьте данные перед подтверждением!""",
+        "transfer_cancelled": "🚫 <b>Перевод отменен!</b>",
+        "transfer_timeout": "⏱️ <b>Время ожидания подтверждения истекло!</b>",
+        "user_info": """👤 Пользователь: @{}
+├ 🔗 Профиль LZT: {}
+├ ℹ️ Группа: {}
+├ 📝 Статус: {}
+├ 💬 Сообщений: {}
+├ 💚 Симпатий: {}
+├ 👍 Лайков: {}
+├ 🎁 Розыгрышей: {}
+├ 🏆 Трофеев: {}
+├ 👥 Подписчиков: {}
+├ 👤 Подписок: {}
+├ ⏳ Дата регистрации: {}
+└ ✅ Заблокирован: {}""",
     }
 
     def __init__(self):
         self.config = loader.ModuleConfig(
-            loader.ConfigValue(
-                "api_token",
-                None,
-                "🔑 API-ключ Lolz.live",
-                validator=loader.validators.String(),
-            ),
-            loader.ConfigValue(
-                "secret_phrase",
-                None,
-                "🔐 Секретная фраза для переводов",
-                validator=loader.validators.String(),
-            ),
+            "api_key", None, "API ключ для Lolz.live",
+            "api_url", "https://api.lolz.live", "URL API Lolz.live",
+            "secret_phrase", None, "Секретная фраза для подтверждения переводов"
         )
-        self._lock = asyncio.Lock()  # Защита от одновременных запросов
-        self._pending_transfers = {}
+        self.name = self.strings["name"]
 
-    async def _api_request(self, endpoint, params=None, method="GET"):
-        """Запрос к API Lolz.live"""
-        token = self.config["api_token"]
-        if not token:
-            return None, "API-ключ не настроен!"
+    async def client_ready(self, client, db):
+        """Инициализация модуля"""
+        self._client = client
+        self._db = db
 
-        url = f"https://api.lolz.live/{endpoint}"
-        headers = {"Authorization": f"Bearer {token}"}
-
-        try:
-            async with self._lock:
-                async with aiohttp.ClientSession() as session:
-                    async with (session.get(url, headers=headers, params=params) if method == "GET"
-                                else session.post(url, headers=headers, json=params)) as response:
-                        if response.status != 200:
-                            return None, f"Ошибка {response.status}"
-                        return await response.json(), None
-        except Exception as e:
-            logger.error(f"Ошибка API: {e}")
-            return None, str(e)
-
-    async def _get_user_info(self, username):
-        """Получение информации о пользователе"""
-        data, error = await self._api_request(f"users/find?username={username}")
-        if error:
-            return None, error
-
-        users = data.get("users", [])
-        for user in users:
-            if user["username"].lower() == username.lower():
-                return user, None
-        return None, "Пользователь не найден!"
-
-    async def lolzp_cmd(self, message: Message):
-        """Получает информацию о профиле Lolz.live"""
-        args = utils.get_args(message)
+    async def lolzapicmd(self, message: Message):
+        """
+        Установка API ключа
+        Использование: .lolzapi <ваш_api_ключ>
+        """
+        args = utils.get_args_raw(message)
         if not args:
-            return await message.edit("❌ Укажите ник пользователя!")
+            await utils.answer(message, self.strings["api_key_error"])
+            return
 
-        username = args[0]
-        user, error = await self._get_user_info(username)
-        if error:
-            return await message.edit(self.strings("profile_not_found").format(username))
+        self._db.set("lolzliveapi", "api_key", args)
+        await utils.answer(message, self.strings["api_key_set"])
 
-        text = (
-            f"👤 <b>Профиль {user['username']}</b>\n"
-            f"🔹 ID: <code>{user['user_id']}</code>\n"
-            f"💰 Баланс: <code>{user['balance']}</code>₽\n"
-            f"📌 Статус: <b>{user['status']}</b>\n"
-            f"🎭 Группа: <b>{user['group']}</b>\n"
-            f"🔗 <a href='https://lolz.live/members/{user['user_id']}/'>Профиль</a>"
-        )
-        await message.edit(text)
+    async def lolzpcmd(self, message: Message):
+        """
+        Получение информации о пользователе
+        Использование: .lolzp <username>
+        """
+        args = utils.get_args_raw(message)
+        if not args:
+            await utils.answer(message, self.strings["no_username"])
+            return
 
-    async def lolzt_cmd(self, message: Message):
-        """Переводит деньги пользователю Lolz.live"""
+        api_key = self._db.get("lolzliveapi", "api_key", None)
+        if not api_key:
+            await utils.answer(message, self.strings["api_key_error"])
+            return
+
+        async with aiohttp.ClientSession() as session:
+            try:
+                user_info = await self._fetch_user_info(session, args, api_key)
+                if not user_info:
+                    await utils.answer(message, self.strings["user_not_found"])
+                    return
+
+                user_data = user_info["data"]
+                is_blocked = "Да" if user_data.get("is_blocked", False) else "Нет"
+                profile_url = f"https://lolz.live/members/{user_data['id']}"
+
+                response = self.strings["user_info"].format(
+                    user_data["username"],
+                    profile_url,
+                    user_data.get("group", "Неизвестно"),
+                    user_data.get("status", "Неизвестно"),
+                    user_data.get("messages_count", 0),
+                    user_data.get("likes_count", 0),
+                    user_data.get("likes_given", 0),
+                    user_data.get("giveaways_count", 0),
+                    user_data.get("trophies_count", 0),
+                    user_data.get("followers_count", 0),
+                    user_data.get("subscriptions_count", 0),
+                    user_data.get("registration_date", "Неизвестно"),
+                    is_blocked
+                )
+
+                await utils.answer(message, response)
+            except Exception as e:
+                logger.error(f"Error fetching user info: {e}")
+                await utils.answer(message, self.strings["api_error"].format(str(e)))
+
+    async def lolztcmd(self, message: Message):
+        """
+        Перевод средств пользователю
+        Использование: .lolzt <username> <amount> <comment>
+        """
         args = utils.get_args(message)
         if len(args) < 2:
-            return await message.edit("❌ Используйте: <code>.lolzt ник сумма [комментарий]</code>")
+            await utils.answer(message, "❌ <b>Неверный формат команды!</b>\nИспользование: <code>.lolzt username amount [comment]</code>")
+            return
 
-        username, amount, *comment = args
+        api_key = self._db.get("lolzliveapi", "api_key", None)
+        secret_phrase = self.config["secret_phrase"]
+        
+        if not api_key:
+            await utils.answer(message, self.strings["api_key_error"])
+            return
+            
+        if not secret_phrase:
+            await utils.answer(message, "❌ <b>Секретная фраза не установлена!</b>\nУстановите её в конфигурации модуля.")
+            return
+
+        username = args[0]
         try:
-            amount = float(amount)
+            amount = float(args[1])
             if amount <= 0:
-                return await message.edit(self.strings("invalid_amount"))
+                await utils.answer(message, self.strings["invalid_amount"])
+                return
         except ValueError:
-            return await message.edit(self.strings("invalid_amount"))
+            await utils.answer(message, self.strings["invalid_amount"])
+            return
 
-        comment = " ".join(comment) if comment else "Нет комментария"
-        user, error = await self._get_user_info(username)
-        if error:
-            return await message.edit(self.strings("profile_not_found").format(username))
+        comment = " ".join(args[2:]) if len(args) > 2 else "Автоматический перевод by sunshinelzt"
 
-        user_id = user["user_id"]
-        user_link = f'<a href="https://lolz.live/members/{user_id}/">{username}</a>'
+        async with aiohttp.ClientSession() as session:
+            try:
+                user_info = await self._fetch_user_info(session, username, api_key)
+                if not user_info:
+                    await utils.answer(message, self.strings["user_not_found"])
+                    return
 
-        msg = await message.edit(
-            self.strings("transfer_confirm").format(user=user_link, amount=amount, comment=comment),
-            buttons=[
-                [
-                    {"text": "✅ Подтвердить", "callback": self._confirm_transfer, "args": (message, user_id, amount, comment)},
-                    {"text": "❌ Отмена", "callback": self._cancel_transfer, "args": (message,)}
-                ]
-            ]
-        )
+                user_id = user_info["data"]["id"]
+                username = user_info["data"]["username"]
 
-        self._pending_transfers[message.id] = msg
+                confirmation_message = await utils.answer(
+                    message, 
+                    self.strings["transfer_confirmation"].format(username, amount, comment)
+                )
+                
+                await self._client.edit_message(
+                    confirmation_message.chat_id,
+                    confirmation_message.id,
+                    self.strings["transfer_confirmation"].format(username, amount, comment),
+                    buttons=[
+                        [{"text": "✅ Подтвердить", "callback": f"lolz_confirm_{user_id}_{amount}_{comment}"}],
+                        [{"text": "❌ Отменить", "callback": "lolz_cancel"}]
+                    ]
+                )
+                
+            except Exception as e:
+                logger.error(f"Error in transfer preparation: {e}")
+                await utils.answer(message, self.strings["api_error"].format(str(e)))
 
-    async def _confirm_transfer(self, call, message: Message, user_id, amount, comment):
-        """Подтверждение перевода"""
-        token = self.config["api_token"]
-        secret = self.config["secret_phrase"]
+    async def _fetch_user_info(self, session: aiohttp.ClientSession, username: str, api_key: str) -> Dict[str, Any]:
+        """Получение информации о пользователе по логину"""
+        headers = {
+            "Authorization": f"Bearer {api_key}"
+        }
+        
+        async with session.get(
+            f"{self.config['api_url']}/users/find",
+            headers=headers,
+            params={"username": username}
+        ) as response:
+            if response.status == 200:
+                return await response.json()
+            elif response.status == 404:
+                return None
+            else:
+                raise Exception(f"API error: {response.status}")
 
-        if not token or not secret:
-            return await call.answer("❌ API-ключ и секретная фраза не настроены!", show_alert=True)
+    async def _make_transfer(self, session: aiohttp.ClientSession, user_id: int, amount: float, comment: str, api_key: str) -> Dict[str, Any]:
+        """Выполнение перевода средств пользователю"""
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "user_id": user_id,
+            "amount": amount,
+            "secret_phrase": self.config["secret_phrase"],
+            "comment": comment
+        }
+        
+        async with session.post(
+            f"{self.config['api_url']}/market/pay",
+            headers=headers,
+            json=data
+        ) as response:
+            return await response.json()
 
-        data, error = await self._api_request(
-            "market/pay",
-            {
-                "user_id": user_id,
-                "amount": amount,
-                "secret_phrase": secret,
-                "comment": comment
-            },
-            method="POST"
-        )
+    async def lolz_confirm_callback(self, call):
+        """Обработка подтверждения перевода"""
+        try:
+            _, user_id, amount, comment = call.data.split("_", 3)
+            user_id = int(user_id)
+            amount = float(amount)
+        except (ValueError, IndexError):
+            await call.edit("❌ <b>Ошибка обработки запроса!</b>")
+            return
 
-        if error:
-            return await message.edit(self.strings("transfer_failed").format(error))
+        api_key = self._db.get("lolzliveapi", "api_key", None)
+        if not api_key:
+            await call.edit(self.strings["api_key_error"])
+            return
 
-        user_link = f'<a href="https://lolz.live/members/{user_id}/">{user_id}</a>'
-        await message.edit(
-            self.strings("transfer_success").format(user=user_link, amount=amount, comment=comment)
-        )
+        async with aiohttp.ClientSession() as session:
+            try:
+                result = await self._make_transfer(session, user_id, amount, comment, api_key)
+                if result.get("status") == 200:
+                    await call.edit(self.strings["transfer_success"])
+                else:
+                    await call.edit(self.strings["api_error"].format(result.get("message", "Неизвестная ошибка")))
+            except Exception as e:
+                logger.error(f"Error in transfer execution: {e}")
+                await call.edit(self.strings["api_error"].format(str(e)))
 
-    async def _cancel_transfer(self, call, message: Message):
-        """Отмена перевода"""
-        await message.edit(self.strings("transfer_cancelled"))
+    async def lolz_cancel_callback(self, call):
+        """Обработка отмены перевода"""
+        await call.edit(self.strings["transfer_cancelled"])
