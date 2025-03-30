@@ -22,10 +22,10 @@ import aiohttp
 
 
 @loader.tds
-class sunshine_gemini(loader.Module):
+class SunshineGemini(loader.Module):
     """Модуль для общения с Gemini AI и генерации изображений"""
 
-    strings = {"name": "sunshine_gemini"}
+    strings = {"name": "SunshineGemini"}
 
     def __init__(self):
         self.config = loader.ModuleConfig(
@@ -34,7 +34,7 @@ class sunshine_gemini(loader.Module):
             loader.ConfigValue("model_name", "gemini-1.5-flash", "Модель для Gemini AI. Примеры: gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash-exp, gemini-2.0-flash-thinking-exp-1219", validator=loader.validators.String()),
             loader.ConfigValue("system_instruction", "", "Инструкция для Gemini AI", validator=loader.validators.String()),
             loader.ConfigValue("proxy", "", "Прокси в формате http://<user>:<pass>@<proxy>:<port>, или http://<proxy>:<port>", validator=loader.validators.String()),
-            loader.ConfigValue("default_image_model", "flux", "Модель для генерации изображений. Примеры: sdxl-turbo, sd-3.5, flux, flux-pro, flux-dev, flux-schnell, dall-e-3, midjourney", validator=loader.validators.String()),
+            loader.ConfigValue("default_image_model", "flux", "Модель для генерации изображений. Примеры: flux, flux-pro, flux-realism, flux-anime, flux-3d, flux-cablyai, turbo", validator=loader.validators.String()),
         )
 
     async def client_ready(self, client, db):
@@ -64,6 +64,10 @@ class sunshine_gemini(loader.Module):
         """Генерация изображения"""
         start_time = time.time()
 
+        width = 512
+        height = 512
+        seed = random.randint(1, 1000000)
+
         payload = {
             "model": self.config["default_image_model"],
             "prompt": prompt,
@@ -72,7 +76,7 @@ class sunshine_gemini(loader.Module):
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post("https://api.kshteam.top/v1/images/generate", headers={"Authorization": f"Bearer {self.config['api_key_image']}", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Content-Type": "application/json"}, json=payload) as response:
+                async with session.post("https://pollinations.ai/p/{prompt}?width={width}&height={height}&seed={seed}&model={model}", headers={"Authorization": f"Bearer {self.config['api_key_image']}", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Content-Type": "application/json"}, json=payload) as response:
                     generation_time = round(time.time() - start_time, 2)
                     if response.status == 200:
                         data = await response.json()
