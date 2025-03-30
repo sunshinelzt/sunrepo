@@ -294,7 +294,7 @@ class SunshineGPT(loader.Module):
             await message.edit("<emoji document_id=5274099962655816924>❗️</emoji> <b>Пожалуйста, укажите описание для генерации изображения.</b>")
             return
 
-        await message.edit(f"<emoji document_id=5386367538735104399>⌛️</emoji> Сервер генерирует картинку, пожалуйста, подождите...")
+        await message.edit(f"<emoji document_id=5386367538735104399>⌛️</emoji> <b>Сервер генерирует картинку, пожалуйста, подождите...</b>")
 
         image_url, generation_time = await self.generate_image(prompt)
 
