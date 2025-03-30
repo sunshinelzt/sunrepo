@@ -287,7 +287,7 @@ class SunshineGemini(loader.Module):
                 os.remove(media_path)
 
     @loader.command()
-    async def gimg(self, message):
+    async def gmg(self, message):
         """— генерация изображения"""
         prompt = utils.get_args_raw(message)
         if not prompt:
