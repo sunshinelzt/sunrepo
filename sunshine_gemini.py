@@ -22,7 +22,7 @@ import aiohttp
 
 
 @loader.tds
-class alexis_gemini(loader.Module):
+class sunshine_gemini(loader.Module):
     """Модуль для общения с Gemini AI и генерации изображений"""
 
     strings = {"name": "sunshine_gemini"}
@@ -61,7 +61,7 @@ class alexis_gemini(loader.Module):
         return None
 
     async def generate_image(self, prompt):
-        """Генерация изображения с использованием Flux или другой модели"""
+        """Генерация изображения"""
         start_time = time.time()
 
         payload = {
@@ -276,7 +276,7 @@ class alexis_gemini(loader.Module):
             random_emoji = choice(random_emojis)
 
             if show_question and prompt != "Опиши это":
-                await message.edit(f"<blockquote><emoji document_id=5443038326535759644>💬</emoji> Вопрос: {prompt}</blockquote>\n<blockquote><emoji document_id=5325547803936572038>✨</emoji> Ответ от Gemini:</blockquote> {reply_text} {random_emoji}")
+                await message.edit(f"<emoji document_id=5443038326535759644>💬</emoji> Вопрос: {prompt}\n<emoji document_id=5325547803936572038>✨</emoji> Ответ от Gemini: {reply_text} {random_emoji}")
             else:
                 await message.edit(f"<emoji document_id=5325547803936572038>✨</emoji> Ответ от Gemini: {reply_text} {random_emoji}")
         except Exception as e:
@@ -309,5 +309,8 @@ class alexis_gemini(loader.Module):
                         f"<blockquote><emoji document_id=5877465816030515018>😀</emoji> Ссылка на изображение: <a href='{image_url}'>Смотреть изображение</a></blockquote>\n"
                         f"<blockquote><emoji document_id=5877260593903177342>⚙️</emoji> Модель: <code>{self.config['default_image_model']}</code></blockquote>"
                     ))
+
+                   try:
+                       os.remove(img_content.name)
         else:
             await message.edit(f"<emoji document_id=5881702736843511327>⚠️</emoji> Ошибка: {generation_time}")
