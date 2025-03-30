@@ -88,7 +88,7 @@ class SunshineGemini(loader.Module):
         except Exception as e:
             return None, f"Ошибка: {str(e)}"
 
-    async def geminicmd(self, message):
+    async def gptcmd(self, message):
         """— отправить запрос к Gemini"""
         if not self.config["api_key"]:
             await message.edit("<emoji document_id=5274099962655816924>❗️</emoji> API ключ не указан. Получите его на aistudio.google.com/apikey")
