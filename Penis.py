@@ -1,11 +1,10 @@
-# членикииипенис
+# членикииипенис1
 
 import asyncio
 import aiohttp
 from typing import Optional, Dict, Any, Tuple
 from telethon.tl.types import Message
 from telethon import events
-from telethon.tl.custom import Button
 
 from .. import loader, utils
 
@@ -59,6 +58,12 @@ class LolzTransferMod(loader.Module):
                 0, 
                 doc="Время холда в днях",
                 validator=loader.validators.Integer(minimum=0)
+            ),
+            loader.ConfigValue(
+                "banner_url",
+                None,
+                doc="URL баннера для формы перевода",
+                validator=loader.validators.String()
             )
         )
         self._cache = {}
@@ -67,12 +72,7 @@ class LolzTransferMod(loader.Module):
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
-        
-        # Регистрируем inline-хэндлер
-        client.add_event_handler(
-            self._inline_handler,
-            events.InlineQuery(pattern=r"lolz_transfer")
-        )
+        self.inline = self.import_hook("hikka.inline")
 
     async def _validate_config(self) -> bool:
         """Проверка конфигурации"""
@@ -114,37 +114,6 @@ class LolzTransferMod(loader.Module):
                         # Сохраняем в кэш
                         self._cache[cache_key] = user
                         self._cache[f"user_id_{user['user_id']}"] = user
-                        
-                    return user
-        except Exception:
-            return None
-
-    async def _get_user_info_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """Получение информации о пользователе по ID"""
-        # Используем кэш, если есть
-        cache_key = f"user_id_{user_id}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-
-        try:
-            headers = {"Authorization": f"Bearer {self.config['api_token']}"}
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"https://api.lolz.live/users/{user_id}", 
-                    headers=headers,
-                    timeout=10
-                ) as response:
-                    if response.status != 200:
-                        return None
-                        
-                    data = await response.json()
-                    user = data.get("user")
-                    
-                    if user:
-                        # Сохраняем в кэш
-                        self._cache[cache_key] = user
-                        self._cache[f"username_{user['username'].lower()}"] = user
                         
                     return user
         except Exception:
@@ -228,162 +197,44 @@ class LolzTransferMod(loader.Module):
             "username": username
         }
 
-        # Формируем инлайн-кнопки - правильный способ для Hikka
-        buttons = [
-            [
-                Button.inline(
-                    "✅ Подтвердить", 
-                    data=f"lolz_confirm_{transfer_id}"
-                ),
-                Button.inline(
-                    "❌ Отмена", 
-                    data=f"lolz_cancel_{transfer_id}"
-                )
-            ]
-        ]
-
-        await utils.answer(
-            message,
-            self.strings["transfer_confirm"].format(
-                amount=f"{amount:.2f}",
-                user_link=user_link,
-                comment=comment
-            ),
-            buttons=buttons
-        )
-
-    @loader.inline_handler(pattern="lolz_transfer")
-    async def _inline_handler(self, query):
-        """Обработчик инлайн-запросов"""
-        if not await self._validate_config():
-            return await query.answer(
-                [
-                    {
-                        "title": "❌ Модуль не настроен",
-                        "description": "Нужно настроить API токен и секретную фразу",
-                        "message": self.strings["no_config"],
-                        "thumb": "https://img.icons8.com/color/48/000000/error--v1.png"
-                    }
-                ],
-                cache_time=0
-            )
-
-        # Парсим запрос: lolz_transfer username amount [comment]
-        args = query.text.split()[1:] if len(query.text.split()) > 1 else []
-        
-        if len(args) < 2:
-            return await query.answer(
-                [
-                    {
-                        "title": "ℹ️ Помощь по использованию",
-                        "description": "Формат: lolz_transfer <ник> <сумма> [комментарий]",
-                        "message": self.strings["missing_arguments"],
-                        "thumb": "https://img.icons8.com/color/48/000000/help--v1.png"
-                    }
-                ],
-                cache_time=0
-            )
-
-        username, amount_str, *comment_parts = args
-        comment = " ".join(comment_parts) if comment_parts else "Без комментария"
-
-        try:
-            amount = float(amount_str)
-            if amount <= 0:
-                raise ValueError
-        except ValueError:
-            return await query.answer(
-                [
-                    {
-                        "title": "❗ Некорректная сумма",
-                        "description": "Введите положительное число",
-                        "message": self.strings["invalid_amount"],
-                        "thumb": "https://img.icons8.com/color/48/000000/cancel--v1.png"
-                    }
-                ],
-                cache_time=0
-            )
-
-        # Получаем информацию о пользователе
-        user_info = await self._get_user_info(username)
-        
-        if not user_info:
-            return await query.answer(
-                [
-                    {
-                        "title": "🔍 Пользователь не найден",
-                        "description": f"Пользователь {username} не найден на Lolz.live",
-                        "message": self.strings["user_not_found"].format(username=username),
-                        "thumb": "https://img.icons8.com/color/48/000000/search--v1.png"
-                    }
-                ],
-                cache_time=0
-            )
-
-        user_id = user_info["user_id"]
-        precise_username = user_info["username"]
-        
-        # Генерируем уникальный ID для перевода
-        transfer_id = utils.rand(16)
-        
-        # Сохраняем данные о переводе
-        self._pending_transfers[transfer_id] = {
-            "user_id": user_id,
-            "amount": amount,
-            "comment": comment,
-            "username": precise_username
-        }
-
-        # Создаем инлайн-результат с кнопками подтверждения/отмены
-        user_link = f"<a href='https://lolz.live/members/{user_id}/'>{precise_username}</a>"
-        
-        text = self.strings["transfer_confirm"].format(
+        # Формируем текст для подтверждения
+        confirm_text = self.strings["transfer_confirm"].format(
             amount=f"{amount:.2f}",
             user_link=user_link,
             comment=comment
         )
-        
-        # Правильное создание инлайн-кнопок для ответа
-        buttons = [
-            [
-                Button.inline(
-                    "✅ Подтвердить", 
-                    data=f"lolz_confirm_{transfer_id}"
-                ),
-                Button.inline(
-                    "❌ Отмена", 
-                    data=f"lolz_cancel_{transfer_id}"
-                )
-            ]
-        ]
 
-        return await query.answer(
-            [
-                {
-                    "title": f"💸 Перевод {amount} руб. для {precise_username}",
-                    "description": f"Комментарий: {comment}",
-                    "message": text,
-                    "buttons": buttons
-                }
-            ],
-            cache_time=0
-        )
+        # Создаем инлайн-форму с кнопками
+        if self.config["banner_url"] is None:
+            await self.inline.form(
+                message=message,
+                text=confirm_text,
+                reply_markup=[
+                    [
+                        {"text": "✅ Подтвердить", "callback": self._confirm_callback, "args": (transfer_id,)},
+                        {"text": "❌ Отмена", "callback": self._cancel_callback, "args": (transfer_id,)},
+                    ],
+                ],
+            )
+        else:
+            await self.inline.form(
+                message=message,
+                text=confirm_text,
+                photo=self.config["banner_url"],
+                reply_markup=[
+                    [
+                        {"text": "✅ Подтвердить", "callback": self._confirm_callback, "args": (transfer_id,)},
+                        {"text": "❌ Отмена", "callback": self._cancel_callback, "args": (transfer_id,)},
+                    ],
+                ],
+            )
 
-    # Обработчики колбэков
-    @loader.callback_handler()
-    async def callback_handler(self, call):
-        """Обработчик всех колбэков модуля"""
-        if call.data.startswith(b"lolz_confirm_"):
-            transfer_id = call.data.decode().split("_")[2]
-            await self._confirm_transfer(call, transfer_id)
-        elif call.data.startswith(b"lolz_cancel_"):
-            transfer_id = call.data.decode().split("_")[2]
-            await self._cancel_transfer(call, transfer_id)
-
-    async def _confirm_transfer(self, call, transfer_id):
+    async def _confirm_callback(self, call, transfer_id):
         """Обработчик подтверждения перевода"""
         if transfer_id not in self._pending_transfers:
-            await call.edit(self.strings["transfer_failed"].format(error="Перевод не найден или устарел"))
+            await call.edit(
+                text=self.strings["transfer_failed"].format(error="Перевод не найден или устарел")
+            )
             return
 
         transfer_data = self._pending_transfers[transfer_id]
@@ -415,9 +266,116 @@ class LolzTransferMod(loader.Module):
         # Удаляем данные о переводе
         del self._pending_transfers[transfer_id]
 
-    async def _cancel_transfer(self, call, transfer_id):
+    async def _cancel_callback(self, call, transfer_id):
         """Обработчик отмены перевода"""
         if transfer_id in self._pending_transfers:
             del self._pending_transfers[transfer_id]
         
         await call.edit(text=self.strings["operation_cancelled"])
+
+    @loader.inline_handler(pattern="lolz_transfer")
+    async def inline_handler(self, query):
+        """Обработчик инлайн-запросов для переводов"""
+        if not await self._validate_config():
+            return await query.answer(
+                [
+                    {
+                        "title": "❌ Модуль не настроен",
+                        "description": "Нужно настроить API токен и секретную фразу",
+                        "message": self.strings["no_config"],
+                    }
+                ],
+                cache_time=0
+            )
+
+        # Парсим запрос: lolz_transfer username amount [comment]
+        args = query.text.split()[1:] if len(query.text.split()) > 1 else []
+        
+        if len(args) < 2:
+            return await query.answer(
+                [
+                    {
+                        "title": "ℹ️ Помощь по использованию",
+                        "description": "Формат: lolz_transfer <ник> <сумма> [комментарий]",
+                        "message": self.strings["missing_arguments"],
+                    }
+                ],
+                cache_time=0
+            )
+
+        username, amount_str, *comment_parts = args
+        comment = " ".join(comment_parts) if comment_parts else "Без комментария"
+
+        try:
+            amount = float(amount_str)
+            if amount <= 0:
+                raise ValueError
+        except ValueError:
+            return await query.answer(
+                [
+                    {
+                        "title": "❗ Некорректная сумма",
+                        "description": "Введите положительное число",
+                        "message": self.strings["invalid_amount"],
+                    }
+                ],
+                cache_time=0
+            )
+
+        # Получаем информацию о пользователе
+        user_info = await self._get_user_info(username)
+        
+        if not user_info:
+            return await query.answer(
+                [
+                    {
+                        "title": "🔍 Пользователь не найден",
+                        "description": f"Пользователь {username} не найден на Lolz.live",
+                        "message": self.strings["user_not_found"].format(username=username),
+                    }
+                ],
+                cache_time=0
+            )
+
+        user_id = user_info["user_id"]
+        precise_username = user_info["username"]
+        
+        # Генерируем уникальный ID для перевода
+        transfer_id = utils.rand(16)
+        
+        # Сохраняем данные о переводе
+        self._pending_transfers[transfer_id] = {
+            "user_id": user_id,
+            "amount": amount,
+            "comment": comment,
+            "username": precise_username
+        }
+
+        # Создаем инлайн-результат с кнопками подтверждения/отмены
+        user_link = f"<a href='https://lolz.live/members/{user_id}/'>{precise_username}</a>"
+        
+        text = self.strings["transfer_confirm"].format(
+            amount=f"{amount:.2f}",
+            user_link=user_link,
+            comment=comment
+        )
+
+        # Правильное создание инлайн-кнопок для ответа с использованием новой структуры
+        markup = [
+            [
+                {"text": "✅ Подтвердить", "callback": self._confirm_callback, "args": (transfer_id,)},
+                {"text": "❌ Отмена", "callback": self._cancel_callback, "args": (transfer_id,)},
+            ],
+        ]
+
+        return await query.answer(
+            [
+                {
+                    "title": f"💸 Перевод {amount} руб. для {precise_username}",
+                    "description": f"Комментарий: {comment}",
+                    "message": text,
+                    "reply_markup": markup,
+                }
+            ],
+            cache_time=0
+        )
