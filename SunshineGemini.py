@@ -11,6 +11,7 @@ __version__ = (1, 0, 0, 0)
 
 
 import google.generativeai as genai
+import random
 import os
 import time
 import io
