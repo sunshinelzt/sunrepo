@@ -1,10 +1,10 @@
-# членикииипенис1
+# членикииипенис
 
 import asyncio
 import aiohttp
+import logging
 from typing import Optional, Dict, Any, Tuple
 from telethon.tl.types import Message
-from telethon import events
 
 from .. import loader, utils
 
@@ -68,18 +68,21 @@ class LolzTransferMod(loader.Module):
         )
         self._cache = {}
         self._pending_transfers = {}
+        self._logger = logging.getLogger(__name__)
 
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
-        self.inline = self.import_hook("hikka.inline")
+        
+        # Правильный способ получения inline менеджера в Hikka
+        self.inline = self.allmodules.get_module("InlineManager")
 
     async def _validate_config(self) -> bool:
         """Проверка конфигурации"""
         return bool(self.config['api_token'] and self.config['secret_phrase'])
 
     async def _get_user_info(self, username: str) -> Optional[Dict[str, Any]]:
-        """Получение информации о пользователе по никнейму"""
+        """Получение информации о пользователе по никнейму через API Lolz"""
         if not await self._validate_config():
             return None
 
@@ -98,6 +101,7 @@ class LolzTransferMod(loader.Module):
                     timeout=10
                 ) as response:
                     if response.status != 200:
+                        self._logger.error(f"API error: {response.status}")
                         return None
                         
                     data = await response.json()
@@ -116,7 +120,8 @@ class LolzTransferMod(loader.Module):
                         self._cache[f"user_id_{user['user_id']}"] = user
                         
                     return user
-        except Exception:
+        except Exception as e:
+            self._logger.error(f"Error fetching user info: {e}")
             return None
 
     async def _send_transfer(
@@ -125,7 +130,7 @@ class LolzTransferMod(loader.Module):
         amount: float, 
         comment: str
     ) -> Tuple[bool, Dict[str, Any]]:
-        """Выполнение перевода через API"""
+        """Выполнение перевода через API Lolz.live согласно документации"""
         if not await self._validate_config():
             return False, {"error": "Не настроены API токен и секретная фраза"}
 
@@ -149,6 +154,7 @@ class LolzTransferMod(loader.Module):
                     result = await response.json()
                     return result.get("success", False), result
         except Exception as e:
+            self._logger.error(f"Error sending transfer: {e}")
             return False, {"error": f"Ошибка при выполнении запроса: {str(e)}"}
 
     @loader.command(ru_doc="Перевести средства пользователю")
@@ -204,15 +210,18 @@ class LolzTransferMod(loader.Module):
             comment=comment
         )
 
-        # Создаем инлайн-форму с кнопками
+        # Создаем инлайн-форму с кнопками в соответствии с вашим примером
         if self.config["banner_url"] is None:
             await self.inline.form(
                 message=message,
                 text=confirm_text,
                 reply_markup=[
                     [
-                        {"text": "✅ Подтвердить", "callback": self._confirm_callback, "args": (transfer_id,)},
-                        {"text": "❌ Отмена", "callback": self._cancel_callback, "args": (transfer_id,)},
+                        {"text": "✅ Подтвердить", "callback": self._confirm_transfer, "args": (transfer_id,)},
+                        {"text": "❌ Отмена", "callback": self._cancel_transfer, "args": (transfer_id,)},
+                    ],
+                    [
+                        {"text": "🔻 Закрыть", "callback": self._delete_form}  
                     ],
                 ],
             )
@@ -223,13 +232,16 @@ class LolzTransferMod(loader.Module):
                 photo=self.config["banner_url"],
                 reply_markup=[
                     [
-                        {"text": "✅ Подтвердить", "callback": self._confirm_callback, "args": (transfer_id,)},
-                        {"text": "❌ Отмена", "callback": self._cancel_callback, "args": (transfer_id,)},
+                        {"text": "✅ Подтвердить", "callback": self._confirm_transfer, "args": (transfer_id,)},
+                        {"text": "❌ Отмена", "callback": self._cancel_transfer, "args": (transfer_id,)},
+                    ],
+                    [
+                        {"text": "🔻 Закрыть", "callback": self._delete_form}  
                     ],
                 ],
             )
 
-    async def _confirm_callback(self, call, transfer_id):
+    async def _confirm_transfer(self, call, transfer_id):
         """Обработчик подтверждения перевода"""
         if transfer_id not in self._pending_transfers:
             await call.edit(
@@ -257,21 +269,25 @@ class LolzTransferMod(loader.Module):
                 )
             )
         else:
+            error_msg = result.get("error", "Неизвестная ошибка")
+            self._logger.error(f"Transfer failed: {error_msg}")
             await call.edit(
-                text=self.strings["transfer_failed"].format(
-                    error=result.get("error", "Неизвестная ошибка")
-                )
+                text=self.strings["transfer_failed"].format(error=error_msg)
             )
 
         # Удаляем данные о переводе
         del self._pending_transfers[transfer_id]
 
-    async def _cancel_callback(self, call, transfer_id):
+    async def _cancel_transfer(self, call, transfer_id):
         """Обработчик отмены перевода"""
         if transfer_id in self._pending_transfers:
             del self._pending_transfers[transfer_id]
         
         await call.edit(text=self.strings["operation_cancelled"])
+        
+    async def _delete_form(self, call):
+        """Обработчик закрытия формы"""
+        await call.delete()
 
     @loader.inline_handler(pattern="lolz_transfer")
     async def inline_handler(self, query):
@@ -360,21 +376,22 @@ class LolzTransferMod(loader.Module):
             comment=comment
         )
 
-        # Правильное создание инлайн-кнопок для ответа с использованием новой структуры
-        markup = [
-            [
-                {"text": "✅ Подтвердить", "callback": self._confirm_callback, "args": (transfer_id,)},
-                {"text": "❌ Отмена", "callback": self._cancel_callback, "args": (transfer_id,)},
-            ],
-        ]
-
+        # Правильное создание инлайн-кнопок для ответа
         return await query.answer(
             [
                 {
                     "title": f"💸 Перевод {amount} руб. для {precise_username}",
                     "description": f"Комментарий: {comment}",
                     "message": text,
-                    "reply_markup": markup,
+                    "reply_markup": [
+                        [
+                            {"text": "✅ Подтвердить", "callback": self._confirm_transfer, "args": (transfer_id,)},
+                            {"text": "❌ Отмена", "callback": self._cancel_transfer, "args": (transfer_id,)},
+                        ],
+                        [
+                            {"text": "🔻 Закрыть", "callback": self._delete_form}  
+                        ],
+                    ],
                 }
             ],
             cache_time=0
