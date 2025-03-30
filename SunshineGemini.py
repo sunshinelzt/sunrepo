@@ -35,7 +35,7 @@ class SunshineGemini(loader.Module):
             loader.ConfigValue("model_name", "gemini-1.5-flash", "Модель для Gemini AI. Примеры: gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash-exp, gemini-2.0-flash-thinking-exp-1219", validator=loader.validators.String()),
             loader.ConfigValue("system_instruction", "", "Инструкция для Gemini AI", validator=loader.validators.String()),
             loader.ConfigValue("proxy", "", "Прокси в формате http://<user>:<pass>@<proxy>:<port>, или http://<proxy>:<port>", validator=loader.validators.String()),
-            loader.ConfigValue("default_image_model", "flux", "Модель для генерации изображений. Примеры: flux, flux-pro, flux-realism, flux-anime, flux-3d, flux-cablyai, turbo", validator=loader.validators.String()),
+            loader.ConfigValue("default_image_model", "flux", "Модель для генерации изображений. Примеры: sdxl-turbo, flux, flux-pro, flux-dev, flux-schnell, dall-e-3, midjourney", validator=loader.validators.String()),
         )
 
     async def client_ready(self, client, db):
@@ -65,10 +65,6 @@ class SunshineGemini(loader.Module):
         """Генерация изображения"""
         start_time = time.time()
 
-        width = 512
-        height = 512
-        seed = random.randint(1, 1000000)
-
         payload = {
             "model": self.config["default_image_model"],
             "prompt": prompt,
@@ -77,7 +73,7 @@ class SunshineGemini(loader.Module):
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post("https://pollinations.ai/p/{prompt}?width={width}&height={height}&seed={seed}&model={model}", headers={"Authorization": f"Bearer {self.config['api_key_image']}", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Content-Type": "application/json"}, json=payload) as response:
+                async with session.post("https://api.kshteam.top/v1/images/generate", headers={"Authorization": f"Bearer {self.config['api_key_image']}", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Content-Type": "application/json"}, json=payload) as response:
                     generation_time = round(time.time() - start_time, 2)
                     if response.status == 200:
                         data = await response.json()
@@ -311,7 +307,6 @@ class SunshineGemini(loader.Module):
                     await utils.answer_file(message, img_content, caption=(
                         f"<blockquote><emoji document_id=5465143921912846619>💭</emoji> Промт: <code>{prompt}</code></blockquote>\n"
                         f"<blockquote><emoji document_id=5199457120428249992>🕘</emoji> Время генерации: {generation_time} сек.</blockquote>\n"
-                        f"<blockquote><emoji document_id=5877465816030515018>😀</emoji> Ссылка на изображение: <a href='{image_url}'>Смотреть изображение</a></blockquote>\n"
                         f"<blockquote><emoji document_id=5877260593903177342>⚙️</emoji> Модель: <code>{self.config['default_image_model']}</code></blockquote>"
                     ))
 
