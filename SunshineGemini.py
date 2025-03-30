@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0, 0)
+__version__ = (1, 4, 8, 8)
 
 # meta developer: @sunshinelzt
 
