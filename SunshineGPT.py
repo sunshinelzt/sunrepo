@@ -23,10 +23,10 @@ import aiohttp
 
 
 @loader.tds
-class SunshineGemini(loader.Module):
+class SunshineGPT(loader.Module):
     """Модуль для общения с Gemini AI и генерации изображений"""
 
-    strings = {"name": "SunshineGemini"}
+    strings = {"name": "SunshineGPT"}
 
     def __init__(self):
         self.config = loader.ModuleConfig(
