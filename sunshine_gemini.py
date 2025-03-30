@@ -88,7 +88,7 @@ class sunshine_gemini(loader.Module):
             return None, f"Ошибка: {str(e)}"
 
     async def geminicmd(self, message):
-        """<reply to media/text> — отправить запрос к Gemini"""
+        """— отправить запрос к Gemini"""
         if not self.config["api_key"]:
             await message.edit("<emoji document_id=5274099962655816924>❗️</emoji> API ключ не указан. Получите его на aistudio.google.com/apikey")
             return
@@ -287,7 +287,7 @@ class sunshine_gemini(loader.Module):
 
     @loader.command()
     async def gimg(self, message):
-        """Генерация изображения"""
+        """— генерация изображения"""
         prompt = utils.get_args_raw(message)
         if not prompt:
             await message.edit("<emoji document_id=5274099962655816924>❗️</emoji> Пожалуйста, укажите описание для генерации изображения.")
