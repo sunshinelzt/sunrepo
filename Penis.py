@@ -1,119 +1,414 @@
-# членикииипенис
+# членикииипенис123
 
-import requests
-from telethon import loader, utils
-from telethon.tl.custom import Message
-from telethon import events, Button
+import asyncio
+import aiohttp
+from typing import Optional, Dict, Any, Tuple
+from telethon.tl.types import Message
+from telethon import events
 
+from .. import loader, utils
+
+
+@loader.tds
 class LolzTransferMod(loader.Module):
-    """Модуль для перевода средств с поиском пользователя через API Zelenka"""
-    strings = {"name": "LolzTransfer"}
+    """💰 Продвинутый модуль безопасных переводов Lolz.live"""
+
+    strings = {
+        "name": "LolzTransfer",
+        "transfer_header": "💸 <b>Безопасный перевод средств</b>",
+        "config_api_token": "🔑 API токен Lolz.live",
+        "config_secret_phrase": "🔐 Секретная фраза для переводов",
+        "transfer_confirm": (
+            "🔔 <b>Подтверждение перевода:</b>\n\n"
+            "• Сумма: <code>{amount}</code> руб.\n"
+            "• Получатель: {user_link}\n"
+            "• Комментарий: <code>{comment}</code>\n\n"
+            "⚠️ Тщательно проверьте данные!"
+        ),
+        "transfer_success": (
+            "✅ <b>Перевод выполнен!</b>\n\n"
+            "• Сумма: <code>{amount}</code> руб.\n"
+            "• Получатель: {user_link}\n"
+            "• Комментарий: <code>{comment}</code>"
+        ),
+        "transfer_failed": "❌ <b>Ошибка перевода:</b> {error}",
+        "user_not_found": "🔍 Пользователь <code>{username}</code> не найден",
+        "invalid_amount": "❗ Некорректная сумма. Введите положительное число.",
+        "missing_arguments": "❓ Формат: <code>.transfer &lt;ник&gt; &lt;сумма&gt; [комментарий]</code>",
+        "no_config": "❌ Настройте API токен и секретную фразу в конфиге!",
+        "operation_cancelled": "🚫 Операция отменена пользователем"
+    }
 
     def __init__(self):
         self.config = loader.ModuleConfig(
-            "API_KEY", "", "API-ключ для Zelenka",
-            "SECRET_PHRASE", "", "Секретная фраза для переводов",
-            "HOLD_TIME", 0, "Длительность холда (0 = без холда)",
-            "HOLD_UNIT", "hour", "Единица времени холда (hour/day)"
+            loader.ConfigValue(
+                "api_token", 
+                None, 
+                doc=lambda: self.strings["config_api_token"],
+                validator=loader.validators.String()
+            ),
+            loader.ConfigValue(
+                "secret_phrase", 
+                None, 
+                doc=lambda: self.strings["config_secret_phrase"],
+                validator=loader.validators.String()
+            ),
+            loader.ConfigValue(
+                "hold", 
+                0, 
+                doc="Время холда в днях",
+                validator=loader.validators.Integer(minimum=0)
+            )
         )
+        self._cache = {}
+        self._pending_transfers = {}
 
     async def client_ready(self, client, db):
-        self.client = client
-
-    async def lolzmcmd(self, message: Message):
-        """Перевод: .lolzm ник сумма валюта [комментарий]"""
-        args = utils.get_args_raw(message).split()
-
-        if len(args) < 3:
-            await message.edit("<b>Использование:</b> <code>.lolzm ник сумма валюта [комментарий]</code>")
-            return
-
-        nickname, amount, currency = args[:3]
-        comment = " ".join(args[3:]) if len(args) > 3 else "Без комментария"
-
-        # Поиск пользователя через API Zelenka
-        user = await self.find_user(nickname)
-        if not user:
-            await message.edit(f"❌ <b>Пользователь</b> <code>{nickname}</code> <b>не найден.</b>")
-            return
-
-        # Составляем текст с информацией о переводе
-        profile_url = f"https://lolz.live/members/{user['id']}/"
-        text = (
-            f"💸 <b>Вы собираетесь перевести:</b> <code>{amount} {currency.upper()}</code>\n"
-            f"👤 <b>Получатель:</b> <a href='{profile_url}'>{user['name']}</a>\n"
-            f"💬 <b>Комментарий:</b> <i>{comment}</i>\n"
-            f"⏳ <b>Холд:</b> {self.config['HOLD_TIME']} {self.config['HOLD_UNIT']}"
+        self._client = client
+        self._db = db
+        
+        # Регистрируем inline-хэндлер
+        client.add_event_handler(
+            self._inline_handler,
+            events.InlineQuery(pattern=r"lolz_transfer")
         )
 
-        # Кнопки подтверждения или отмены
-        buttons = [
-            [Button.inline("✅ Подтвердить", data=f"confirm_{user['id']}_{amount}_{currency}_{comment}"),
-             Button.inline("❌ Отмена", data="cancel")]
-        ]
+    async def _validate_config(self) -> bool:
+        """Проверка конфигурации"""
+        return bool(self.config['api_token'] and self.config['secret_phrase'])
 
-        # Отправляем сообщение с кнопками
-        await self.client.send_message(message.chat_id, text, buttons=buttons, parse_mode='html')
-
-    async def find_user(self, nickname: str):
-        """Поиск пользователя по нику через API Zelenka"""
-        url = f"https://api.zelenka.guru/users/find?username={nickname}"
-        headers = {
-            "Authorization": f"Bearer {self.config['API_KEY']}",
-            "User-Agent": "Mozilla/5.0"
-        }
-        
-        # Отправка GET запроса
-        try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()  # Проверка на ошибки
-            data = response.json()
-            if data.get("status") == "success":
-                return {"id": data['user']['id'], "name": data['user']['username']}
-            else:
-                return None
-        except requests.exceptions.RequestException as e:
-            print(f"Ошибка при поиске пользователя: {e}")
+    async def _get_user_info(self, username: str) -> Optional[Dict[str, Any]]:
+        """Получение информации о пользователе по никнейму"""
+        if not await self._validate_config():
             return None
 
-    async def on_callback_query(self, call):
-        """Обработка callback запросов на кнопки"""
-        data = call.data.decode("utf-8")
-        if data.startswith("confirm_"):
-            _, user_id, amount, currency, comment = data.split("_", 4)
-            response = await self.transfer_funds(user_id, amount, currency, comment)
-            if response.get("success"):
-                await call.answer("✅ Перевод успешно выполнен!", alert=True)
-            else:
-                error = response.get("error", "Ошибка при переводе.")
-                await call.answer(f"❌ {error}", alert=True)
-        elif data == "cancel":
-            await call.answer("❌ Перевод отменён.", alert=True)
-
-    async def transfer_funds(self, user_id, amount, currency, comment):
-        """Функция для выполнения перевода средств"""
-        url = "https://api.lzt.market/balance/transfer"
-        headers = {
-            "Authorization": f"Bearer {self.config['API_KEY']}",
-            "Content-Type": "application/json"
-        }
-
-        # Параметры для перевода
-        payload = {
-            "amount": amount,
-            "currency": currency,
-            "secret_answer": self.config["SECRET_PHRASE"],
-            "user_id": user_id,
-            "comment": comment,
-            "hold": self.config["HOLD_TIME"],
-            "hold_unit": self.config["HOLD_UNIT"]
-        }
+        # Используем кэш, если есть
+        cache_key = f"username_{username.lower()}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
 
         try:
-            response = requests.post(url, json=payload, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-            return data
-        except requests.exceptions.RequestException as e:
-            print(f"Ошибка при выполнении перевода: {e}")
-            return {"error": "Произошла ошибка при выполнении перевода."}
+            headers = {"Authorization": f"Bearer {self.config['api_token']}"}
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://api.lolz.live/users/find?username={username}", 
+                    headers=headers,
+                    timeout=10
+                ) as response:
+                    if response.status != 200:
+                        return None
+                        
+                    data = await response.json()
+                    users = data.get("users", [])
+                    
+                    matching_users = [
+                        user for user in users 
+                        if user["username"].lower() == username.lower()
+                    ]
+                    
+                    user = matching_users[0] if matching_users else None
+                    
+                    if user:
+                        # Сохраняем в кэш
+                        self._cache[cache_key] = user
+                        self._cache[f"user_id_{user['user_id']}"] = user
+                        
+                    return user
+        except Exception:
+            return None
+
+    async def _get_user_info_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Получение информации о пользователе по ID"""
+        # Используем кэш, если есть
+        cache_key = f"user_id_{user_id}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        try:
+            headers = {"Authorization": f"Bearer {self.config['api_token']}"}
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://api.lolz.live/users/{user_id}", 
+                    headers=headers,
+                    timeout=10
+                ) as response:
+                    if response.status != 200:
+                        return None
+                        
+                    data = await response.json()
+                    user = data.get("user")
+                    
+                    if user:
+                        # Сохраняем в кэш
+                        self._cache[cache_key] = user
+                        self._cache[f"username_{user['username'].lower()}"] = user
+                        
+                    return user
+        except Exception:
+            return None
+
+    async def _send_transfer(
+        self, 
+        user_id: str, 
+        amount: float, 
+        comment: str
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Выполнение перевода через API"""
+        if not await self._validate_config():
+            return False, {"error": "Не настроены API токен и секретная фраза"}
+
+        try:
+            headers = {"Authorization": f"Bearer {self.config['api_token']}"}
+            payload = {
+                "user_id": user_id,
+                "amount": amount,
+                "secret_phrase": self.config["secret_phrase"],
+                "hold": self.config.get("hold", 0),
+                "comment": comment
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.lolz.live/market/pay", 
+                    json=payload, 
+                    headers=headers,
+                    timeout=15
+                ) as response:
+                    result = await response.json()
+                    return result.get("success", False), result
+        except Exception as e:
+            return False, {"error": f"Ошибка при выполнении запроса: {str(e)}"}
+
+    @loader.command(ru_doc="Перевести средства пользователю")
+    async def transfercmd(self, message: Message):
+        """Инициировать безопасный перевод: .transfer <ник> <сумма> [комментарий]"""
+        if not await self._validate_config():
+            await utils.answer(message, self.strings["no_config"])
+            return
+
+        args = utils.get_args_raw(message).split(maxsplit=2)
+        if len(args) < 2:
+            await utils.answer(message, self.strings["missing_arguments"])
+            return
+
+        username, amount_str, *comment_parts = args
+        comment = comment_parts[0] if comment_parts else "Без комментария"
+
+        try:
+            amount = float(amount_str)
+            if amount <= 0:
+                raise ValueError
+        except ValueError:
+            await utils.answer(message, self.strings["invalid_amount"])
+            return
+
+        user_info = await self._get_user_info(username)
+        if not user_info:
+            await utils.answer(
+                message, 
+                self.strings["user_not_found"].format(username=username)
+            )
+            return
+
+        user_id = user_info["user_id"]
+        username = user_info["username"]  # Используем точный никнейм
+        user_link = f"<a href='https://lolz.live/members/{user_id}/'>{username}</a>"
+
+        # Генерируем уникальный ID для перевода
+        transfer_id = utils.rand(16)
+        
+        # Сохраняем данные о переводе
+        self._pending_transfers[transfer_id] = {
+            "user_id": user_id,
+            "amount": amount,
+            "comment": comment,
+            "username": username
+        }
+
+        # Формируем инлайн-кнопки
+        markup = self._client.build_reply_markup([
+            [
+                {
+                    "text": "✅ Подтвердить",
+                    "callback": self._confirm_transfer,
+                    "args": (transfer_id,)
+                },
+                {
+                    "text": "❌ Отмена",
+                    "callback": self._cancel_transfer,
+                    "args": (transfer_id,)
+                }
+            ]
+        ])
+
+        await utils.answer(
+            message,
+            self.strings["transfer_confirm"].format(
+                amount=f"{amount:.2f}",
+                user_link=user_link,
+                comment=comment
+            ),
+            reply_markup=markup
+        )
+
+    async def _confirm_transfer(self, call, transfer_id):
+        """Обработчик подтверждения перевода"""
+        if transfer_id not in self._pending_transfers:
+            await call.edit(self.strings["transfer_failed"].format(error="Перевод не найден или устарел"))
+            return
+
+        transfer_data = self._pending_transfers[transfer_id]
+        user_id = transfer_data["user_id"]
+        amount = transfer_data["amount"]
+        comment = transfer_data["comment"]
+        username = transfer_data["username"]
+        
+        user_link = f"<a href='https://lolz.live/members/{user_id}/'>{username}</a>"
+
+        # Выполняем перевод
+        success, result = await self._send_transfer(user_id, amount, comment)
+
+        if success:
+            await call.edit(
+                self.strings["transfer_success"].format(
+                    amount=f"{amount:.2f}",
+                    user_link=user_link,
+                    comment=comment
+                )
+            )
+        else:
+            await call.edit(
+                self.strings["transfer_failed"].format(
+                    error=result.get("error", "Неизвестная ошибка")
+                )
+            )
+
+        # Удаляем данные о переводе
+        del self._pending_transfers[transfer_id]
+
+    async def _cancel_transfer(self, call, transfer_id):
+        """Обработчик отмены перевода"""
+        if transfer_id in self._pending_transfers:
+            del self._pending_transfers[transfer_id]
+        
+        await call.edit(self.strings["operation_cancelled"])
+
+    async def _inline_handler(self, query):
+        """Обработчик инлайн-запросов"""
+        if not await self._validate_config():
+            return await query.answer(
+                [
+                    {
+                        "title": "❌ Модуль не настроен",
+                        "description": "Нужно настроить API токен и секретную фразу",
+                        "message": self.strings["no_config"],
+                        "thumb": "https://img.icons8.com/color/48/000000/error--v1.png"
+                    }
+                ],
+                cache_time=0
+            )
+
+        # Парсим запрос: lolz_transfer username amount [comment]
+        args = query.text.split()[1:] if len(query.text.split()) > 1 else []
+        
+        if len(args) < 2:
+            return await query.answer(
+                [
+                    {
+                        "title": "ℹ️ Помощь по использованию",
+                        "description": "Формат: lolz_transfer <ник> <сумма> [комментарий]",
+                        "message": self.strings["missing_arguments"],
+                        "thumb": "https://img.icons8.com/color/48/000000/help--v1.png"
+                    }
+                ],
+                cache_time=0
+            )
+
+        username, amount_str, *comment_parts = args
+        comment = " ".join(comment_parts) if comment_parts else "Без комментария"
+
+        try:
+            amount = float(amount_str)
+            if amount <= 0:
+                raise ValueError
+        except ValueError:
+            return await query.answer(
+                [
+                    {
+                        "title": "❗ Некорректная сумма",
+                        "description": "Введите положительное число",
+                        "message": self.strings["invalid_amount"],
+                        "thumb": "https://img.icons8.com/color/48/000000/cancel--v1.png"
+                    }
+                ],
+                cache_time=0
+            )
+
+        # Получаем информацию о пользователе
+        user_info = await self._get_user_info(username)
+        
+        if not user_info:
+            return await query.answer(
+                [
+                    {
+                        "title": "🔍 Пользователь не найден",
+                        "description": f"Пользователь {username} не найден на Lolz.live",
+                        "message": self.strings["user_not_found"].format(username=username),
+                        "thumb": "https://img.icons8.com/color/48/000000/search--v1.png"
+                    }
+                ],
+                cache_time=0
+            )
+
+        user_id = user_info["user_id"]
+        precise_username = user_info["username"]
+        
+        # Генерируем уникальный ID для перевода
+        transfer_id = utils.rand(16)
+        
+        # Сохраняем данные о переводе
+        self._pending_transfers[transfer_id] = {
+            "user_id": user_id,
+            "amount": amount,
+            "comment": comment,
+            "username": precise_username
+        }
+
+        # Создаем инлайн-результат с кнопками подтверждения/отмены
+        user_link = f"<a href='https://lolz.live/members/{user_id}/'>{precise_username}</a>"
+        
+        text = self.strings["transfer_confirm"].format(
+            amount=f"{amount:.2f}",
+            user_link=user_link,
+            comment=comment
+        )
+        
+        markup = self._client.build_reply_markup([
+            [
+                {
+                    "text": "✅ Подтвердить",
+                    "callback": self._confirm_transfer,
+                    "args": (transfer_id,)
+                },
+                {
+                    "text": "❌ Отмена",
+                    "callback": self._cancel_transfer,
+                    "args": (transfer_id,)
+                }
+            ]
+        ])
+
+        return await query.answer(
+            [
+                {
+                    "title": f"💸 Перевод {amount} руб. для {precise_username}",
+                    "description": f"Комментарий: {comment}",
+                    "message": text,
+                    "reply_markup": markup,
+                    "thumb": "https://img.icons8.com/color/48/000000/money-transfer.png"
+                }
+            ],
+            cache_time=0
+        )
