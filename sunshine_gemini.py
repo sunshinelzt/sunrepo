@@ -312,5 +312,7 @@ class sunshine_gemini(loader.Module):
 
                     try:
                         os.remove(img_content.name)
+                    except Exception as e:
+                        print(f"Ошибка при удалении файла: {e}")
         else:
             await message.edit(f"<emoji document_id=5881702736843511327>⚠️</emoji> Ошибка: {generation_time}")
