@@ -1,10 +1,11 @@
-# членикииипенис123
+# членикииипенис
 
 import asyncio
 import aiohttp
 from typing import Optional, Dict, Any, Tuple
 from telethon.tl.types import Message
 from telethon import events
+from telethon.tl.custom import Button
 
 from .. import loader, utils
 
@@ -227,21 +228,19 @@ class LolzTransferMod(loader.Module):
             "username": username
         }
 
-        # Формируем инлайн-кнопки
-        markup = self._client.build_reply_markup([
+        # Формируем инлайн-кнопки - правильный способ для Hikka
+        buttons = [
             [
-                {
-                    "text": "✅ Подтвердить",
-                    "callback": self._confirm_transfer,
-                    "args": (transfer_id,)
-                },
-                {
-                    "text": "❌ Отмена",
-                    "callback": self._cancel_transfer,
-                    "args": (transfer_id,)
-                }
+                Button.inline(
+                    "✅ Подтвердить", 
+                    data=f"lolz_confirm_{transfer_id}"
+                ),
+                Button.inline(
+                    "❌ Отмена", 
+                    data=f"lolz_cancel_{transfer_id}"
+                )
             ]
-        ])
+        ]
 
         await utils.answer(
             message,
@@ -250,51 +249,10 @@ class LolzTransferMod(loader.Module):
                 user_link=user_link,
                 comment=comment
             ),
-            reply_markup=markup
+            buttons=buttons
         )
 
-    async def _confirm_transfer(self, call, transfer_id):
-        """Обработчик подтверждения перевода"""
-        if transfer_id not in self._pending_transfers:
-            await call.edit(self.strings["transfer_failed"].format(error="Перевод не найден или устарел"))
-            return
-
-        transfer_data = self._pending_transfers[transfer_id]
-        user_id = transfer_data["user_id"]
-        amount = transfer_data["amount"]
-        comment = transfer_data["comment"]
-        username = transfer_data["username"]
-        
-        user_link = f"<a href='https://lolz.live/members/{user_id}/'>{username}</a>"
-
-        # Выполняем перевод
-        success, result = await self._send_transfer(user_id, amount, comment)
-
-        if success:
-            await call.edit(
-                self.strings["transfer_success"].format(
-                    amount=f"{amount:.2f}",
-                    user_link=user_link,
-                    comment=comment
-                )
-            )
-        else:
-            await call.edit(
-                self.strings["transfer_failed"].format(
-                    error=result.get("error", "Неизвестная ошибка")
-                )
-            )
-
-        # Удаляем данные о переводе
-        del self._pending_transfers[transfer_id]
-
-    async def _cancel_transfer(self, call, transfer_id):
-        """Обработчик отмены перевода"""
-        if transfer_id in self._pending_transfers:
-            del self._pending_transfers[transfer_id]
-        
-        await call.edit(self.strings["operation_cancelled"])
-
+    @loader.inline_handler(pattern="lolz_transfer")
     async def _inline_handler(self, query):
         """Обработчик инлайн-запросов"""
         if not await self._validate_config():
@@ -385,20 +343,19 @@ class LolzTransferMod(loader.Module):
             comment=comment
         )
         
-        markup = self._client.build_reply_markup([
+        # Правильное создание инлайн-кнопок для ответа
+        buttons = [
             [
-                {
-                    "text": "✅ Подтвердить",
-                    "callback": self._confirm_transfer,
-                    "args": (transfer_id,)
-                },
-                {
-                    "text": "❌ Отмена",
-                    "callback": self._cancel_transfer,
-                    "args": (transfer_id,)
-                }
+                Button.inline(
+                    "✅ Подтвердить", 
+                    data=f"lolz_confirm_{transfer_id}"
+                ),
+                Button.inline(
+                    "❌ Отмена", 
+                    data=f"lolz_cancel_{transfer_id}"
+                )
             ]
-        ])
+        ]
 
         return await query.answer(
             [
@@ -406,9 +363,61 @@ class LolzTransferMod(loader.Module):
                     "title": f"💸 Перевод {amount} руб. для {precise_username}",
                     "description": f"Комментарий: {comment}",
                     "message": text,
-                    "reply_markup": markup,
-                    "thumb": "https://img.icons8.com/color/48/000000/money-transfer.png"
+                    "buttons": buttons
                 }
             ],
             cache_time=0
         )
+
+    # Обработчики колбэков
+    @loader.callback_handler()
+    async def callback_handler(self, call):
+        """Обработчик всех колбэков модуля"""
+        if call.data.startswith(b"lolz_confirm_"):
+            transfer_id = call.data.decode().split("_")[2]
+            await self._confirm_transfer(call, transfer_id)
+        elif call.data.startswith(b"lolz_cancel_"):
+            transfer_id = call.data.decode().split("_")[2]
+            await self._cancel_transfer(call, transfer_id)
+
+    async def _confirm_transfer(self, call, transfer_id):
+        """Обработчик подтверждения перевода"""
+        if transfer_id not in self._pending_transfers:
+            await call.edit(self.strings["transfer_failed"].format(error="Перевод не найден или устарел"))
+            return
+
+        transfer_data = self._pending_transfers[transfer_id]
+        user_id = transfer_data["user_id"]
+        amount = transfer_data["amount"]
+        comment = transfer_data["comment"]
+        username = transfer_data["username"]
+        
+        user_link = f"<a href='https://lolz.live/members/{user_id}/'>{username}</a>"
+
+        # Выполняем перевод
+        success, result = await self._send_transfer(user_id, amount, comment)
+
+        if success:
+            await call.edit(
+                text=self.strings["transfer_success"].format(
+                    amount=f"{amount:.2f}",
+                    user_link=user_link,
+                    comment=comment
+                )
+            )
+        else:
+            await call.edit(
+                text=self.strings["transfer_failed"].format(
+                    error=result.get("error", "Неизвестная ошибка")
+                )
+            )
+
+        # Удаляем данные о переводе
+        del self._pending_transfers[transfer_id]
+
+    async def _cancel_transfer(self, call, transfer_id):
+        """Обработчик отмены перевода"""
+        if transfer_id in self._pending_transfers:
+            del self._pending_transfers[transfer_id]
+        
+        await call.edit(text=self.strings["operation_cancelled"])
