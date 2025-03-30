@@ -84,14 +84,14 @@ class SunshineGPT(loader.Module):
                         else:
                             return None, "Ошибка получения URL изображения"
                     else:
-                        return None, f"Ошибка сервера: {response.status}"
+                        return None, f"<b>Ошибка сервера:</b> {response.status}"
         except Exception as e:
-            return None, f"Ошибка: {str(e)}"
+            return None, f"<b>Ошибка:</b> {str(e)}"
 
     async def gptcmd(self, message):
         """— отправить запрос к Gemini"""
         if not self.config["api_key"]:
-            await message.edit("<emoji document_id=5274099962655816924>❗️</emoji> API ключ не указан. Получите его на aistudio.google.com/apikey")
+            await message.edit("<emoji document_id=5274099962655816924>❗️</emoji> <b>API ключ не указан. Получите его на aistudio.google.com/apikey</b>")
             return
 
         prompt = utils.get_args_raw(message)
@@ -107,7 +107,7 @@ class SunshineGPT(loader.Module):
                 media_path = await reply.download_media()
                 if not prompt:
                     prompt = "Опиши это"
-                    await message.edit("<emoji document_id=5386367538735104399>⌛️</emoji> Опиши это...")
+                    await message.edit("<emoji document_id=5386367538735104399>⌛️</emoji> <b>Опиши это...</b>")
                     show_question = False
             else:
                 prompt = prompt or reply.text
@@ -116,15 +116,15 @@ class SunshineGPT(loader.Module):
             try:
                 img = Image.open(media_path)
             except Exception as e:
-                await message.edit(f"<emoji document_id=5274099962655816924>❗️</emoji> Не удалось открыть изображение: {e}")
+                await message.edit(f"<emoji document_id=5274099962655816924>❗️</emoji> <b>Не удалось открыть изображение:</b> {e}")
                 os.remove(media_path)
                 return
 
         if not prompt and not img and not media_path:
-            await message.edit("<emoji document_id=5274099962655816924>❗️</emoji> Введите запрос или ответьте на сообщение (изображение, видео, GIF, стикер, голосовое)")
+            await message.edit("<emoji document_id=5274099962655816924>❗️</emoji> <b>Введите запрос или ответьте на сообщение (изображение, видео, GIF, стикер, голосовое)</b>")
             return
 
-        await message.edit("<emoji document_id=5325547803936572038>✨</emoji> Запрос отправлен, ожидайте ответ...")
+        await message.edit("<emoji document_id=5325547803936572038>✨</emoji> <b>Запрос отправлен, ожидайте ответ...</b>")
 
         try:
             genai.configure(api_key=self.config["api_key"])
@@ -147,11 +147,11 @@ class SunshineGPT(loader.Module):
                     ))
 
             if not content_parts:
-                await message.edit("<emoji document_id=5274099962655816924>❗️</emoji> Ошибка: Запрос должен содержать текст или медиа.")
+                await message.edit("<emoji document_id=5274099962655816924>❗️</emoji> <b>Ошибка: Запрос должен содержать текст или медиа.</b>")
                 return
 
             response = model.generate_content(content_parts)
-            reply_text = response.text.strip() if response.text else "<emoji document_id=5274099962655816924>❗️</emoji> Ответ пустой."
+            reply_text = response.text.strip() if response.text else "<emoji document_id=5274099962655816924>❗️</emoji> <b>Ответ пустой.</b>"
 
             random_emojis = [
                 "<emoji document_id=5440588507254896965>🤨</emoji>",
@@ -277,11 +277,11 @@ class SunshineGPT(loader.Module):
             random_emoji = choice(random_emojis)
 
             if show_question and prompt != "Опиши это":
-                await message.edit(f"<emoji document_id=5443038326535759644>💬</emoji> Вопрос: {prompt}\n<emoji document_id=5325547803936572038>✨</emoji> Ответ от Gemini: {reply_text} {random_emoji}")
+                await message.edit(f"<emoji document_id=5443038326535759644>💬</emoji> <b>Вопрос:</b> {prompt}\n<emoji document_id=5325547803936572038>✨</emoji> <b>Ответ от Gemini:</b> {reply_text} {random_emoji}")
             else:
-                await message.edit(f"<emoji document_id=5325547803936572038>✨</emoji> Ответ от Gemini: {reply_text} {random_emoji}")
+                await message.edit(f"<emoji document_id=5325547803936572038>✨</emoji> <b>Ответ от Gemini:</b> {reply_text} {random_emoji}")
         except Exception as e:
-            await message.edit(f"<emoji document_id=5274099962655816924>❗️</emoji> Ошибка: {e}")
+            await message.edit(f"<emoji document_id=5274099962655816924>❗️</emoji> <b>Ошибка:</b> {e}")
         finally:
             if media_path:
                 os.remove(media_path)
@@ -291,7 +291,7 @@ class SunshineGPT(loader.Module):
         """— генерация изображения"""
         prompt = utils.get_args_raw(message)
         if not prompt:
-            await message.edit("<emoji document_id=5274099962655816924>❗️</emoji> Пожалуйста, укажите описание для генерации изображения.")
+            await message.edit("<emoji document_id=5274099962655816924>❗️</emoji> <b>Пожалуйста, укажите описание для генерации изображения.</b>")
             return
 
         await message.edit(f"<emoji document_id=5386367538735104399>⌛️</emoji> Сервер генерирует картинку, пожалуйста, подождите...")
@@ -315,4 +315,4 @@ class SunshineGPT(loader.Module):
                     except Exception as e:
                         print(f"Ошибка при удалении файла: {e}")
         else:
-            await message.edit(f"<emoji document_id=5881702736843511327>⚠️</emoji> Ошибка: {generation_time}")
+            await message.edit(f"<emoji document_id=5881702736843511327>⚠️</emoji> <b>Ошибка:</b> {generation_time}")
