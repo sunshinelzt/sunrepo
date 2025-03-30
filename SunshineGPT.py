@@ -305,9 +305,9 @@ class SunshineGPT(loader.Module):
                     img_content.name = "generated_image.png"
 
                     await utils.answer_file(message, img_content, caption=(
-                        f"<blockquote><emoji document_id=5465143921912846619>💭</emoji> Промт: <code>{prompt}</code></blockquote>\n"
-                        f"<blockquote><emoji document_id=5877260593903177342>⚙️</emoji> Модель: <code>{self.config['default_image_model']}</code></blockquote>\n"
-                        f"<blockquote><emoji document_id=5199457120428249992>🕘</emoji> Время генерации: {generation_time} сек.</blockquote>"
+                        f"<blockquote><emoji document_id=5465143921912846619>💭</emoji> <b>Промт:</b> <code>{prompt}</code></blockquote>\n"
+                        f"<blockquote><emoji document_id=5877260593903177342>⚙️</emoji> <b>Модель:</b> <code>{self.config['default_image_model']}</code></blockquote>\n"
+                        f"<blockquote><emoji document_id=5199457120428249992>🕘</emoji> <b>Время генерации:</b> {generation_time} сек.</blockquote>"
                     ))
 
                     try:
