@@ -310,7 +310,7 @@ class sunshine_gemini(loader.Module):
                         f"<blockquote><emoji document_id=5877260593903177342>⚙️</emoji> Модель: <code>{self.config['default_image_model']}</code></blockquote>"
                     ))
 
-                   try:
-                       os.remove(img_content.name)
+                    try:
+                        os.remove(img_content.name)
         else:
             await message.edit(f"<emoji document_id=5881702736843511327>⚠️</emoji> Ошибка: {generation_time}")
