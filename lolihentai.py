@@ -9,20 +9,20 @@ logger = logging.getLogger("LoliHentai")
 
 @loader.tds
 class LoliHentai(loader.Module):
-    """Лучший источник лоли"""
+    """Лучший источник лолек"""
 
     strings = {
         "name": "LoliHentai",
         "loading_photo": "<emoji document_id=5215327832040811010>⏳</emoji> <b>Загружаю твою лолю...</b>",
         "error_loading": (
             "<emoji document_id=5282195959215807315>❌</emoji> <b>Ошибка!</b>\n\n"
-            "<emoji document_id=5796440171364749940>📌</emoji> <b>Проверь, не заблокирован ли @ferganteusbot</b)\n"
-            "<emoji document_id=5796440171364749940>📌</emoji> <b>Попробуй позже, возможно, бот временно недоступен</b>"
+            "<emoji document_id=5796440171364749940>📌</emoji> Проверь, не заблокирован ли @ferganteusbot\n"
+            "<emoji document_id=5796440171364749940>📌</emoji> Попробуй позже, возможно, бот временно недоступен"
         ),
     }
 
     async def lolicmd(self, message: Message):
-        """Получить случайное лоли-фото"""
+        """Получить случайную лольку"""
         status = await utils.answer(message, self.strings("loading_photo"))
 
         async with self._client.conversation("@ferganteusbot") as conv:
@@ -31,13 +31,12 @@ class LoliHentai(loader.Module):
                 response = await conv.get_response()
 
                 if response.photo:
-                    await message.client.send_file(
+                    await message.client.send_message(
                         message.peer_id,
-                        response.photo,
-                        caption="<emoji document_id=5339156929656582222>✨</emoji> <b>Вот твоя лоля!</b>",
-                        reply_to=message.reply_to_msg_id,
+                        response,
+                        reply_to=message.reply_to_msg_id
                     )
-
+                
                 await asyncio.gather(
                     request.delete(),
                     response.delete(),
