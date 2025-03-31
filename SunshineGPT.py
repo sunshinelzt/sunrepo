@@ -11,7 +11,6 @@ __version__ = (1, 4, 8, 8)
 
 
 import google.generativeai as genai
-import random
 import os
 import time
 import io
@@ -316,3 +315,59 @@ class SunshineGPT(loader.Module):
                         print(f"Ошибка при удалении файла: {e}")
         else:
             await message.edit(f"<emoji document_id=5881702736843511327>⚠️</emoji> <b>Ошибка:</b> {generation_time}")
+
+        @loader.command()
+    async def ghist(self, message):
+        """– анализ последних 400 сообщений чата"""
+        if not self.config["api_key"]:
+            await message.edit("<emoji document_id=5274099962655816924>❗️</emoji> API ключ не указан. Получите его на aistudio.google.com/apikey")
+            return
+
+        user = None
+        user_name = ""
+        if message.is_reply:
+            reply = await message.get_reply_message()
+            user = reply.sender.username if reply.sender else None
+            user_name = reply.sender.first_name if reply.sender else "Пользователь"
+            if user:
+                await message.edit(f"<emoji document_id=5386367538735104399>⌛️</emoji> Собираю историю сообщений для {user_name}...")
+            else:
+                await message.edit("<emoji document_id=5386367538735104399>⌛️</emoji> Собираю историю сообщений...")
+        else:
+            await message.edit("<emoji document_id=5386367538735104399>⌛️</emoji> Собираю историю чата...")
+
+        chat_id = message.chat_id
+        last_400_messages = []
+        async for msg in self.client.iter_messages(chat_id, limit=400):
+            if msg.text and (not user or msg.sender.username == user):
+                last_400_messages.append(msg.text)
+
+        chat_text = "\n\n".join(last_400_messages)
+
+        if user:
+            title = f"Что сегодня обсуждал {user_name}?"
+            prompt = f"Проанализируй следующие сообщения {user_name} и подытожи, что он обсуждал:\n\n{chat_text}"
+        else:
+            title = "Что сегодня обсуждали участники чата?"
+            prompt = f"Проанализируй следующие сообщения всех участников чата и подытожи, что обсуждали участники чата:\n\n{chat_text}"
+
+        result = await self.analyze_chat_history(prompt)
+
+        await message.edit(f"{title}\n\n{result}")
+
+    async def analyze_chat_history(self, chat_text):
+        """Анализирует текст чата с помощью Gemini и возвращает краткий отчет"""
+        try:
+            genai.configure(api_key=self.config["api_key"])
+            model = genai.GenerativeModel(
+                model_name=self.config["model_name"],
+                system_instruction=self.config["system_instruction"] or None,
+            )
+            content_parts = [genai.protos.Part(text=chat_text)]
+            response = model.generate_content(content_parts)
+            reply_text = response.text.strip() if response.text else "Ошибка генерации отчета."
+
+            return reply_text
+
+        except Exception as e:
+            return f"<emoji document_id=5274099962655816924>❗️</emoji> Ошибка: {str(e)}"
