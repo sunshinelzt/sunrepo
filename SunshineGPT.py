@@ -320,7 +320,7 @@ class SunshineGPT(loader.Module):
     async def ghist(self, message):
         """– анализ последних 400 сообщений чата"""
         if not self.config["api_key"]:
-            await message.edit("<emoji document_id=5274099962655816924>❗️</emoji> API ключ не указан. Получите его на aistudio.google.com/apikey")
+            await message.edit("<emoji document_id=5274099962655816924>❗️</emoji> <b>API ключ не указан. Получите его на</b> aistudio.google.com/apikey")
             return
 
         user = None
@@ -330,11 +330,11 @@ class SunshineGPT(loader.Module):
             user = reply.sender.username if reply.sender else None
             user_name = reply.sender.first_name if reply.sender else "Пользователь"
             if user:
-                await message.edit(f"<emoji document_id=5386367538735104399>⌛️</emoji> Собираю историю сообщений для {user_name}...")
+                await message.edit(f"<emoji document_id=5386367538735104399>⌛️</emoji> <b>Собираю историю сообщений для {user_name}...</b>")
             else:
-                await message.edit("<emoji document_id=5386367538735104399>⌛️</emoji> Собираю историю сообщений...")
+                await message.edit("<emoji document_id=5386367538735104399>⌛️</emoji> <b>Собираю историю сообщений...</b>")
         else:
-            await message.edit("<emoji document_id=5386367538735104399>⌛️</emoji> Собираю историю чата...")
+            await message.edit("<emoji document_id=5386367538735104399>⌛️</emoji> <b>Собираю историю чата...</b>")
 
         chat_id = message.chat_id
         last_400_messages = []
@@ -345,10 +345,10 @@ class SunshineGPT(loader.Module):
         chat_text = "\n\n".join(last_400_messages)
 
         if user:
-            title = f"Что сегодня обсуждал {user_name}?"
+            title = f"<b>Что сегодня обсуждал {user_name}?</b>"
             prompt = f"Проанализируй следующие сообщения {user_name} и подытожи, что он обсуждал:\n\n{chat_text}"
         else:
-            title = "Что сегодня обсуждали участники чата?"
+            title = "<b>Что сегодня обсуждали участники чата?</b>"
             prompt = f"Проанализируй следующие сообщения всех участников чата и подытожи, что обсуждали участники чата:\n\n{chat_text}"
 
         result = await self.analyze_chat_history(prompt)
