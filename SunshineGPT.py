@@ -316,7 +316,7 @@ class SunshineGPT(loader.Module):
         else:
             await message.edit(f"<emoji document_id=5881702736843511327>⚠️</emoji> <b>Ошибка:</b> {generation_time}")
 
-        @loader.command()
+    @loader.command()
     async def ghist(self, message):
         """– анализ последних 400 сообщений чата"""
         if not self.config["api_key"]:
