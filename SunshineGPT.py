@@ -1,4 +1,4 @@
-__version__ = (1, 5, 0, 0)
+__version__ = (1, 4, 8, 8)
 
 # meta developer: @sunshinelzt
 
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 @loader.tds
 class SunshineGPT(loader.Module):
-    """Улучшенный модуль для общения с Gemini AI и генерации изображений"""
+    """Модуль для общения с Gemini AI и генерации изображений"""
 
     strings = {
         "name": "SunshineGPT",
@@ -49,8 +49,8 @@ class SunshineGPT(loader.Module):
                          "<blockquote><emoji document_id=5199457120428249992>🕘</emoji> <b>Время генерации:</b> {time} сек.</blockquote>",
         "collecting_history": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>Собираю историю сообщений для {}...</b>",
         "collecting_chat": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>Собираю историю чата...</b>",
-        "user_analysis_title": "<b>Что сегодня обсуждал {}?</b>",
-        "chat_analysis_title": "<b>Что сегодня обсуждали участники чата?</b>",
+        "user_analysis_title": "<emoji document_id=5873121512445187130>❓</emoji> <b>Что сегодня обсуждал {}?</b>",
+        "chat_analysis_title": "<emoji document_id=5873121512445187130>❓</emoji> <b>Что сегодня обсуждали участники чата?</b>",
         "empty_media": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Не удалось открыть изображение:</b> {}",
         "empty_content": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Ошибка: Запрос должен содержать текст или медиа.</b>",
     }
@@ -238,7 +238,6 @@ class SunshineGPT(loader.Module):
         self.client = client
         self.db = db
         
-        # Настройка прокси если указан
         if self.config["proxy"]:
             os.environ["HTTP_PROXY"] = self.config["proxy"]
             os.environ["HTTPS_PROXY"] = self.config["proxy"]
@@ -287,7 +286,6 @@ class SunshineGPT(loader.Module):
             "response_format": "url"
         }
 
-        # Настройка HTTP-клиента с учетом прокси
         http_proxy = self.config["proxy"] if self.config["proxy"] else None
         conn = aiohttp.TCPConnector(ssl=False)
         timeout = aiohttp.ClientTimeout(total=self.config["timeout"])
@@ -298,7 +296,6 @@ class SunshineGPT(loader.Module):
             "Content-Type": "application/json"
         }
 
-        # Система повторных попыток с экспоненциальной задержкой
         for attempt in range(self.config["max_retries"]):
             try:
                 async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
@@ -322,8 +319,7 @@ class SunshineGPT(loader.Module):
                                 logger.error(error_msg)
                                 return None, error_msg
                         elif response.status == 429:
-                            # Rate limit - ждем и пробуем снова
-                            wait_time = 2 ** attempt  # Экспоненциальная задержка
+                            wait_time = 2 ** attempt
                             logger.warning(f"Rate limited, retrying in {wait_time}s (attempt {attempt+1}/{self.config['max_retries']})")
                             await asyncio.sleep(wait_time)
                             continue
@@ -454,7 +450,6 @@ class SunshineGPT(loader.Module):
         image_url, generation_time = await self.generate_image(prompt)
 
         if image_url:
-            # Конфигурация HTTP-клиента для загрузки изображения
             timeout = aiohttp.ClientTimeout(total=30)
             conn = aiohttp.TCPConnector(ssl=False)
             
@@ -508,25 +503,19 @@ class SunshineGPT(loader.Module):
             chat_id = message.chat_id
             all_messages = []
             
-            # Собираем сообщения партиями по 100
             total_collected = 0
             async for msg in self.client.iter_messages(chat_id, limit=history_limit):
-                # Пропускаем сообщения бота и служебные сообщения
                 if msg and msg.sender and not getattr(msg.sender, "bot", False) and not msg.action:
-                    # Сохраняем только текст сообщения, имя отправителя и дату
                     sender_name = msg.sender.first_name if hasattr(msg.sender, "first_name") else "Unknown"
                     sender_username = msg.sender.username if hasattr(msg.sender, "username") else None
                     
-                    # Проверяем, ищем ли мы сообщения конкретного пользователя
                     if user and sender_username != user:
                         continue
                         
-                    # Получаем текст сообщения или обозначение медиа
                     msg_text = msg.text if msg.text else ""
                     if not msg_text and msg.media:
                         msg_text = "[медиа]"
                     
-                    # Формируем запись о сообщении
                     message_data = {
                         "sender": sender_name,
                         "time": msg.date.strftime("%H:%M:%S"),
@@ -536,7 +525,6 @@ class SunshineGPT(loader.Module):
                     all_messages.append(message_data)
                     total_collected += 1
                     
-                # Если достигли лимита или проанализировали достаточно сообщений
                 if total_collected >= history_limit:
                     break
             
@@ -544,10 +532,8 @@ class SunshineGPT(loader.Module):
                 await utils.answer(message, self.strings["error"].format("Не найдено подходящих сообщений"))
                 return
                 
-            # Сортируем сообщения по времени (от старых к новым)
             all_messages.sort(key=lambda x: x["time"])
             
-            # Создаем запрос для Gemini API
             context = "Ниже представлена история сообщений из чата. "
             if user:
                 context += f"Проанализируй все сообщения пользователя {user_name} и составь краткую сводку о чем он писал сегодня, "
@@ -558,23 +544,18 @@ class SunshineGPT(loader.Module):
                 context += "Выдели основные темы обсуждения, активных участников, общее настроение беседы. В конце напиши шутку про то что ты прочитал и запиши как Шутка от ИИ."
                 title = self.strings["chat_analysis_title"]
                 
-            # Форматируем историю сообщений для запроса
             history_text = "\n".join([f"[{msg['time']}] {msg['sender']}: {msg['text']}" for msg in all_messages])
             
-            # Формируем полный запрос
             prompt = f"{context}\n\nИстория сообщений:\n{history_text}"
             
-            # Показываем статус обработки
             processing_msg = await utils.answer(
                 message, 
                 self.strings["processing"].format("Анализирую сообщения...")
             )
             
-            # Выполняем запрос к API
             content_parts = [genai.protos.Part(text=prompt)]
             analysis = await self._process_gemini_query(content_parts)
             
-            # Форматируем и отправляем результат
             random_emoji = await self._get_random_emoji()
             result = f"{title}\n\n{analysis} {random_emoji}"
             
