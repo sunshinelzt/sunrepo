@@ -1,6 +1,6 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 1, 0)
 
-# meta developer: @sunshinelzt
+# meta developer: @username
 
 # ██████╗██╗  ██╗ █████╗ ████████╗ ██████╗ ██████╗ ████████╗
 #██╔════╝██║  ██║██╔══██╗╚══██╔══╝██╔════╝ ██╔══██╗╚══██╔══╝
@@ -55,8 +55,8 @@ class ChatGPTMod(loader.Module):
             ),
             loader.ConfigValue(
                 "model_name", 
-                "gpt-4", 
-                "Модель ChatGPT. Примеры: gpt-4, gpt-3.5-turbo", 
+                "gpt-4o", 
+                "Модель ChatGPT. Примеры: gpt-4o, gpt-4-turbo, gpt-3.5-turbo", 
                 validator=loader.validators.String()
             ),
             loader.ConfigValue(
@@ -252,13 +252,14 @@ class ChatGPTMod(loader.Module):
         return None
 
     async def _call_chatgpt_api(self, messages: List[Dict[str, str]]) -> Optional[str]:
-        """Вызов API ChatGPT"""
+        """Вызов API ChatGPT по новой документации"""
         if not self.config["api_key"]:
             raise ValueError("API ключ не указан")
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.config['api_key']}"
+            "Authorization": f"Bearer {self.config['api_key']}",
+            "OpenAI-Beta": "assistants=v1"  # Актуальный заголовок для API v1
         }
 
         data = {
@@ -276,24 +277,45 @@ class ChatGPTMod(loader.Module):
             try:
                 async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
                     async with session.post(
-                        "https://api.openai.com/v1/chat/completions",
+                        "https://api.openai.com/v1/chat/completions",  # Актуальный эндпоинт
                         headers=headers,
                         json=data,
                         proxy=http_proxy
                     ) as response:
+                        response_text = await response.text()
+                        
+                        try:
+                            response_json = json.loads(response_text)
+                        except json.JSONDecodeError:
+                            logger.error(f"Failed to decode JSON response: {response_text}")
+                            raise Exception(f"Некорректный ответ от API: {response_text[:100]}...")
+                        
                         if response.status == 200:
-                            response_json = await response.json()
-                            return response_json["choices"][0]["message"]["content"].strip()
+                            # В соответствии с новой документацией
+                            if "choices" in response_json and len(response_json["choices"]) > 0:
+                                if "message" in response_json["choices"][0]:
+                                    return response_json["choices"][0]["message"]["content"].strip()
+                                else:
+                                    logger.error(f"Unexpected response format: {response_json}")
+                                    raise Exception("Неожиданный формат ответа от API")
+                            else:
+                                logger.error(f"No choices in response: {response_json}")
+                                raise Exception("Пустой ответ от API")
                         elif response.status == 429:
+                            # Обработка ограничения скорости
                             wait_time = 2 ** attempt
                             logger.warning(f"Rate limited, retrying in {wait_time}s (attempt {attempt+1}/{self.config['max_retries']})")
                             await asyncio.sleep(wait_time)
                             continue
                         else:
-                            error_text = await response.text()
-                            logger.error(f"API error: {response.status} - {error_text}")
-                            error_json = json.loads(error_text) if error_text.startswith("{") else {"error": {"message": error_text}}
-                            error_message = error_json.get("error", {}).get("message", f"HTTP {response.status}")
+                            # Обработка ошибок
+                            error_message = "Неизвестная ошибка"
+                            if "error" in response_json:
+                                if isinstance(response_json["error"], dict):
+                                    error_message = response_json["error"].get("message", f"HTTP {response.status}")
+                                else:
+                                    error_message = str(response_json["error"])
+                            logger.error(f"API error: {response.status} - {error_message}")
                             raise Exception(f"Ошибка API: {error_message}")
             except asyncio.TimeoutError:
                 logger.error(f"Request timeout (attempt {attempt+1}/{self.config['max_retries']})")
@@ -309,7 +331,7 @@ class ChatGPTMod(loader.Module):
         raise Exception("Превышено максимальное количество попыток")
 
     @loader.command(ru_doc="- отправить запрос к ChatGPT")
-    async def gpts(self, message):
+    async def gpt(self, message):
         """- отправить запрос к ChatGPT"""
         if not self.config["api_key"]:
             await utils.answer(message, self.strings["no_api_key"])
