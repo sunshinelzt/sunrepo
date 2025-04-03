@@ -1,5 +1,6 @@
 __version__ = (1, 3, 0)
 
+# пися
 # meta developer: @sunshinelzt
 
 import os
@@ -43,19 +44,19 @@ class ChatGPTMod(loader.Module):
                 "proxy", "", "Прокси для API (если требуется)", validator=loader.validators.String()
             ),
             loader.ConfigValue(
-                "max_retries", 3, "Количество попыток запроса", validator=loader.validators.Integer(1, 5)
+                "max_retries", 3, "Количество попыток запроса", validator=loader.validators.String()
             ),
             loader.ConfigValue(
-                "timeout", 60, "Таймаут запроса (сек)", validator=loader.validators.Integer(10, 300)
+                "timeout", 60, "Таймаут запроса (сек)", validator=loader.validators.String()
             ),
             loader.ConfigValue(
-                "history_limit", 50, "Максимальное число сообщений для анализа", validator=loader.validators.Integer(10, 1000)
+                "history_limit", 50, "Максимальное число сообщений для анализа", validator=loader.validators.String()
             ),
             loader.ConfigValue(
-                "max_tokens", 1000, "Максимальное число токенов в ответе", validator=loader.validators.Integer(50, 4096)
+                "max_tokens", 1000, "Максимальное число токенов в ответе", validator=loader.validators.String()
             ),
             loader.ConfigValue(
-                "temperature", 0.7, "Температура генерации (0-1)", validator=loader.validators.Float(0, 1)
+                "temperature", 0.7, "Температура генерации (0-1)", validator=loader.validators.String()
             ),
         )
         self.conversations = {}  # Хранение истории диалога по chat_id
