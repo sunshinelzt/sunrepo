@@ -1,6 +1,7 @@
 __version__ = (1, 1, 0)
 
-# meta developer: @username
+# пися
+# meta developer: @sunshinelzt
 
 # ██████╗██╗  ██╗ █████╗ ████████╗ ██████╗ ██████╗ ████████╗
 #██╔════╝██║  ██║██╔══██╗╚══██╔══╝██╔════╝ ██╔══██╗╚══██╔══╝
@@ -331,7 +332,7 @@ class ChatGPTMod(loader.Module):
         raise Exception("Превышено максимальное количество попыток")
 
     @loader.command(ru_doc="- отправить запрос к ChatGPT")
-    async def gpt(self, message):
+    async def gpts(self, message):
         """- отправить запрос к ChatGPT"""
         if not self.config["api_key"]:
             await utils.answer(message, self.strings["no_api_key"])
