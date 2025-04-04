@@ -8,6 +8,7 @@
 # ╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚══════╝
 
 
+import os
 import io
 import tempfile
 from moviepy.editor import VideoFileClip
@@ -63,8 +64,12 @@ class ShazamMod(loader.Module):
                         with open(temp_audio.name, "rb") as f:
                             audio_data = io.BytesIO(f.read())
                         await utils.answer(message, self.strings["Searching"])
+                        os.remove(temp_video.name)
+                        os.remove(temp_audio.name)
                         return audio_data, reply
                     except Exception:
+                        os.remove(temp_video.name)
+                        os.remove(temp_audio.name)
                         return None, None
 
         await utils.answer(message, self.strings["no_reply"])
