@@ -1,8 +1,10 @@
 # requires: ShazamAPI, moviepy
+
 import io
 import tempfile
 from moviepy.editor import VideoFileClip
 from ShazamAPI import Shazam
+from urllib.parse import quote_plus
 from .. import loader, utils
 
 @loader.tds
@@ -17,7 +19,7 @@ class ShazamMod(loader.Module):
         "not_found": "🚫 <b>Не удалось распознать трек.</b>",
         "track_info": (
             "✨ <b>Трек найден!</b>\n\n"
-            "<b>Название:</b> <code>{}</code>\n"
+            "<b>Название:</b> <code>{}</code>\n\n"
             "{}{}{}"
         ),
         "youtube": "<b>YouTube:</b> <a href=\"{}\">Слушать</a>\n",
@@ -48,7 +50,7 @@ class ShazamMod(loader.Module):
 
                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio:
                     try:
-                        clip = VideoFileClip(temp_video.name).subclip(0, 15)  # обрезаем до 15 сек
+                        clip = VideoFileClip(temp_video.name).subclip(0, 15)
                         clip.audio.write_audiofile(temp_audio.name, codec="pcm_s16le", verbose=False, logger=None)
                         with open(temp_audio.name, "rb") as f:
                             audio_data = io.BytesIO(f.read())
@@ -74,6 +76,7 @@ class ShazamMod(loader.Module):
             title = recog.get("share", {}).get("subject", "Без названия")
             image = recog.get("images", {}).get("background")
 
+            # Получение ссылок от Shazam
             hub = recog.get("hub", {})
             providers = hub.get("providers", [])
             options = hub.get("options", [])
@@ -82,11 +85,24 @@ class ShazamMod(loader.Module):
             sp_link = next((p.get("actions", [{}])[0].get("uri") for p in providers if p.get("type") == "spotify"), None)
             sc_link = next((o.get("actions", [{}])[0].get("uri") for o in options if o.get("caption", "").lower() == "soundcloud"), None)
 
-            yt_str = self.strings["youtube"].format(yt_link) if yt_link else self.strings["not_found_link"].format("YouTube")
-            sp_str = self.strings["spotify"].format(sp_link) if sp_link else self.strings["not_found_link"].format("Spotify")
-            sc_str = self.strings["soundcloud"].format(sc_link) if sc_link else self.strings["not_found_link"].format("SoundCloud")
+            # Поиск вручную, если Shazam не дал ссылку
+            query = quote_plus(title)
+            if not yt_link:
+                yt_link = f"https://www.youtube.com/results?search_query={query}"
+            if not sp_link:
+                sp_link = f"https://open.spotify.com/search/{query}"
+            if not sc_link:
+                sc_link = f"https://soundcloud.com/search?q={query}"
 
-            caption = self.strings["track_info"].format(title, yt_str, sp_str, sc_str)
+            # Финальные строки
+            yt_str = self.strings["youtube"].format(yt_link)
+            sp_str = self.strings["spotify"].format(sp_link)
+            sc_str = self.strings["soundcloud"].format(sc_link)
+
+            caption = self.strings["track_info"].format(
+                utils.escape_html(title),
+                yt_str, sp_str, sc_str
+            )
 
             await self.client.send_file(
                 message.peer_id,
