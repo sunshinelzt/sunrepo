@@ -91,6 +91,9 @@ class TextToSpeechMod(loader.Module):
         """Преобразование текста в речь. Использование: .speak <текст>"""
         if self._processing:
             return
+
+        if self.config["delete_original"]:
+            await message.delete()
             
         self._processing = True
         
@@ -115,8 +118,6 @@ class TextToSpeechMod(loader.Module):
                     reply_to=reply_to_id
                 )
             
-            if self.config["delete_original"]:
-                await message.delete()
                 
         except Exception:
             pass
