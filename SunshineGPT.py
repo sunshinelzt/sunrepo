@@ -423,9 +423,9 @@ class SunshineGPT(loader.Module):
             random_emoji = await self._get_random_emoji()
 
             if show_question and prompt != "Опиши это":
-                response = f"<emoji document_id=5443038326535759644>💬</emoji> <b>Вопрос:</b> {prompt}\n<emoji document_id=5325547803936572038>✨</emoji> <b>Ответ от Gemini:</b> {reply_text} {random_emoji}"
+                response = f"<emoji document_id=5443038326535759644>💬</emoji> <b>Вопрос:</b> {prompt}\n\n<emoji document_id=5325547803936572038>✨</emoji> <b>Ответ от Gemini:</b> {reply_text} {random_emoji}"
             else:
-                response = f"<emoji document_id=5325547803936572038>✨</emoji> <b>Ответ от Gemini:</b> {reply_text} {random_emoji}"
+                response = f"\n<emoji document_id=5325547803936572038>✨</emoji> <b>Ответ от Gemini:</b> {reply_text} {random_emoji}"
             
             await utils.answer(message, response)
             
