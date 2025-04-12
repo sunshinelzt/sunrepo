@@ -22,7 +22,7 @@ class Emoji:
     ERROR = "<emoji document_id=5210952531676504517>❌</emoji>"
     INFO = "<emoji document_id=5334544901428229844>ℹ️</emoji>"
     MONEY = "<emoji document_id=5409048419211682843>💵</emoji>"
-    CRYSTAL = "<emoji document_id=5427168083074628963>💎</emoji>"
+    CRYSTAL = "💎"
     WALLET = "<emoji document_id=5472363448404809929>👛</emoji>"
     CHECK = "<emoji document_id=5427009714745517609>✅</emoji>"
     SETTINGS = "<emoji document_id=5341715473882955310>⚙️</emoji>"
