@@ -23,7 +23,7 @@ class Emoji:
     INFO = "<emoji document_id=5334544901428229844>ℹ️</emoji>"
     MONEY = "<emoji document_id=5409048419211682843>💵</emoji>"
     CRYSTAL = "💎"
-    WALLET = "<emoji document_id=5472363448404809929>👛</emoji>"
+    WALLET = "👛"
     CHECK = "<emoji document_id=5427009714745517609>✅</emoji>"
     SETTINGS = "<emoji document_id=5341715473882955310>⚙️</emoji>"
 
