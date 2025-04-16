@@ -14,15 +14,14 @@ import re
 import time
 from .. import loader, utils
 
-
 @loader.tds
 class MirrorResponderMod(loader.Module):
-    """🔁 Отвечает зеркалами на ключевые слова"""
+    """Зеркальный автоответчик под фанстат"""
 
     strings = {
         "name": "MirrorResponder",
-        "mirror_enabled": "<emoji document_id=5909201569898827582>🔔</emoji> <b>Автоответчик зеркала включен</b>",
-        "mirror_disabled": "<emoji document_id=5909123362839335003>🔕</emoji> <b>Автоответчик зеркала выключен</b>",
+        "mirror_enabled": "<emoji document_id=5909201569898827582>🔔</emoji> <b>Автоответчик включен</b>",
+        "mirror_disabled": "<emoji document_id=5909123362839335003>🔕</emoji> <b>Автоответчик выключен</b>",
     }
 
     def __init__(self):
@@ -30,26 +29,25 @@ class MirrorResponderMod(loader.Module):
             loader.ConfigValue(
                 "keywords",
                 [
-                    "ссылка", "ссылку", "бота", "бот", "удалили", "снесли", "зеркало",
-                    "блокнули", "заблокировали", "заблокали", "рабочий", "фанстат",
-                    "робот", "ботик", "телелог", "bot", "robot", "фс", "ботом",
-                    "скинь", "фанстатом", "фан стат"
+                    "ссылка", "ссылку", "бота", "бот", "удалили", "снесли",
+                    "зеркало", "блокнули", "заблокировали", "заблокали",
+                    "рабочий", "фанстат", "робот", "ботик", "телелог",
+                    "bot", "robot", "фс", "ботом", "скинь", "фанстатом", "фан стат"
                 ],
-                "Ключевые слова для активации зеркала"
+                "Ключевые слова для активации зеркала",
             ),
             loader.ConfigValue(
                 "mirror_text",
-                "<b>🤖 Актуальные зеркала:</b>\n\n"
-                "@telelogrbot\n"
-                "@telellogbot\n\n"
-                "<i>[Автоматическая отправка].</i>",
-                "Текст зеркала, который будет отправляться в ответ"
+                "<i>🤖 Авто отправка зеркала | Auto Mirror Dispatch</i>\n\n"
+                "@telelogrbot\n@telellogbot\n\n"
+                "Фaнcтaт всегда жив!"
+                "Ответ на сообщение (можно использовать HTML)",
             ),
             loader.ConfigValue(
-                "cooldown", 30, "Задержка между ответами в одном чате (в секундах)"
+                "cooldown", 30, "Кулдаун между ответами в одном чате (в секундах)"
             ),
             loader.ConfigValue(
-                "chats", [], "Список ID чатов, где модуль активен (пусто = везде)"
+                "chats", [], "Список chat_id, в которых работает (пусто — везде)"
             ),
         )
         self.last_response = {}
@@ -61,24 +59,23 @@ class MirrorResponderMod(loader.Module):
 
     @loader.command(ru_doc="Включить/выключить автоответчик зеркала")
     async def mirr(self, message):
+        """Включить/выключить автоответчик"""
         self.is_enabled = not self.is_enabled
         self.db.set(self.__class__.__name__, "enabled", self.is_enabled)
-        await utils.answer(message, self.strings["mirror_enabled"] if self.is_enabled else self.strings["mirror_disabled"])
 
-    def _check_for_keywords(self, text: str) -> bool:
+        await utils.answer(
+            message,
+            self.strings["mirror_enabled"] if self.is_enabled else self.strings["mirror_disabled"]
+        )
+
+    def _has_keywords(self, text: str) -> bool:
         if not text:
             return False
 
-        text_lower = text.lower()
-        keywords = self.config.get("keywords", [])
-        if not isinstance(keywords, list):
-            return False
-
-        for keyword in keywords:
-            pattern = r'(?<!\w)' + re.escape(keyword) + r'(?!\w)'
-            if re.search(pattern, text_lower):
+        text = text.lower()
+        for kw in self.config["keywords"]:
+            if re.search(rf"\b{re.escape(kw)}\b", text):
                 return True
-
         return False
 
     @loader.watcher()
@@ -91,24 +88,26 @@ class MirrorResponderMod(loader.Module):
 
         try:
             chat_id = utils.get_chat_id(message)
-            chats = self.config.get("chats", [])
-            if chats and chat_id not in chats:
+            allowed_chats = self.config["chats"]
+            if allowed_chats and chat_id not in allowed_chats:
                 return
 
             sender = getattr(message, "sender", None)
-            if not sender or sender.bot or sender.id == (await message.client.get_me()).id:
+            if not sender or sender.bot:
                 return
 
-            cooldown = self.config.get("cooldown", 30)
-            current_time = time.time()
+            if sender.id == (await message.client.get_me()).id:
+                return
+
+            now = time.time()
             if chat_id in self.last_response:
-                if current_time - self.last_response[chat_id] < cooldown:
+                if now - self.last_response[chat_id] < self.config["cooldown"]:
                     return
 
-            if self._check_for_keywords(message.text):
-                self.last_response[chat_id] = current_time
-                mirror_text = self.config.get("mirror_text", "")
-                await message.reply(mirror_text)
-                self.log(f"[MirrorResponder] Ответ отправлен в чат {chat_id}")
+            if self._has_keywords(message.text):
+                self.last_response[chat_id] = now
+                await message.reply(self.config["mirror_text"])
+                self.logger.debug(f"[MirrorResponder] Ответ отправлен в чат {chat_id}")
+
         except Exception as e:
-            self.log(f"[MirrorResponder] Ошибка в watcher: {repr(e)}")
+            self.logger.error(f"[MirrorResponder] Ошибка в watcher: {repr(e)}")
