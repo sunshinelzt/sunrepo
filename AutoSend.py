@@ -89,11 +89,11 @@ class AutoSenderMod(loader.Module):
         self._save_chats()
         
         if self.config["random"]:
-            interval = f"от {self.config['min_time']} до {self.config['max_time']} мин"
+            interval = f"от {self.config['min_time']} <b>до</b> {self.config['max_time']} <b>мин</b>"
         else:
             interval = f"{self.config['min_time']} мин"
             
-        await utils.answer(message, f"<b>Автоотправщик: {status}</b>\nИнтервал: {interval}")
+        await utils.answer(message, f"<b>Автоотправщик: {status}</b>\n\n<b>Интервал: {interval}</b>")
     
     async def autochats(self, message: Message):
         """Показать список чатов с активной автоотправкой"""
