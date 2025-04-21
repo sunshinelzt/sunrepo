@@ -17,9 +17,11 @@ import io
 import json
 import asyncio
 import random
-from typing import Tuple, Optional, Dict, Any, List, Union
+import hashlib
+from typing import Tuple, Optional, Dict, Any, List, Union, Callable
 import logging
 from contextlib import suppress
+from functools import wraps, lru_cache
 from PIL import Image
 from .. import loader, utils
 import aiohttp
@@ -28,12 +30,31 @@ import aiohttp
 logger = logging.getLogger(__name__)
 
 
+def retry_decorator(max_retries=3, delay_base=2):
+    """Декоратор для повторных попыток выполнения функции при ошибках"""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return await func(*args, **kwargs)
+                except Exception as e:
+                    logger.error(f"Error in {func.__name__} (attempt {attempt+1}/{max_retries}): {str(e)}")
+                    if attempt == max_retries - 1:
+                        raise
+                    wait_time = delay_base ** attempt
+                    await asyncio.sleep(wait_time)
+        return wrapper
+    return decorator
+
+
 @loader.tds
 class SunshineGPT(loader.Module):
-    """Модуль для общения с Gemini AI и генерации изображений"""
+    """Продвинутый модуль для работы с Google Gemini AI и генерации изображений"""
 
     strings = {
         "name": "SunshineGPT",
+        # Общие сообщения
         "no_api_key": "<emoji document_id=5274099962655816924>❗️</emoji> <b>API ключ не указан. Получите его на aistudio.google.com/apikey</b>",
         "no_prompt": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Введите запрос или ответьте на сообщение (изображение, видео, GIF, стикер, голосовое)</b>",
         "processing": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>{}</b>",
@@ -42,7 +63,7 @@ class SunshineGPT(loader.Module):
         "describe_this": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>Опиши это...</b>",
         "error": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Ошибка:</b> {}",
         "server_error": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Ошибка сервера:</b> {}",
-        "empty_response": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Ответ пустой.</b>",
+        "empty_response": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Ответ пустой. Попробуйте переформулировать запрос.</b>",
         "no_image_prompt": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Пожалуйста, укажите описание для генерации изображения.</b>",
         "image_caption": "<blockquote><emoji document_id=5465143921912846619>💭</emoji> <b>Промт:</b> <code>{prompt}</code></blockquote>\n"
                          "<blockquote><emoji document_id=5877260593903177342>⚙️</emoji> <b>Модель:</b> <code>{model}</code></blockquote>\n"
@@ -53,10 +74,15 @@ class SunshineGPT(loader.Module):
         "chat_analysis_title": "<emoji document_id=5873121512445187130>❓</emoji> <b>Что сегодня обсуждали участники чата?</b>",
         "empty_media": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Не удалось открыть изображение:</b> {}",
         "empty_content": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Ошибка: Запрос должен содержать текст или медиа.</b>",
+        "gemini_response": "<emoji document_id=5325547803936572038>✨</emoji> <b>Ответ от Gemini:</b> {} {}",
+        "question": "<emoji document_id=5443038326535759644>💬</emoji> <b>Вопрос:</b> {}",
+        "gemini_models": "<emoji document_id=5325547803936572038>✨</emoji> <b>Доступные модели Gemini:</b>\n\n{}\n\n<b>Текущая модель:</b> <code>{}</code>\n\n<b>Для изменения модели используйте:</b>\n<code>.config SunshineGPT model_name новая_модель</code>",
+        "help_text": "<emoji document_id=5325547803936572038>✨</emoji> <b>SunshineGPT</b>\n\n<b>Основные команды:</b>\n• <code>.gpt запрос</code> - отправить запрос к Gemini\n• <code>.gimg промпт</code> - сгенерировать изображение\n• <code>.ghist</code> - анализ истории чата (можно с ответом на сообщение)\n• <code>.gmodels</code> - показать доступные модели Gemini\n• <code>.ghelp</code> - показать эту справку\n\n<b>Работа с медиа:</b>\nОтветьте на изображение/видео/стикер с командой <code>.gpt</code>"
     }
 
     def __init__(self):
         self.config = loader.ModuleConfig(
+            # Настройки Gemini
             loader.ConfigValue(
                 "api_key", 
                 "", 
@@ -64,15 +90,9 @@ class SunshineGPT(loader.Module):
                 validator=loader.validators.Hidden(loader.validators.String())
             ),
             loader.ConfigValue(
-                "api_key_image", 
-                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c", 
-                "Это не трогай!", 
-                validator=loader.validators.Hidden(loader.validators.String())
-            ),
-            loader.ConfigValue(
                 "model_name", 
                 "gemini-1.5-flash", 
-                "Модель для Gemini AI. Примеры: gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash-exp, gemini-2.0-flash-thinking-exp-1219", 
+                "Модель для Gemini AI. Примеры: gemini-1.5-flash, gemini-1.5-pro, gemini-pro-vision, gemini-1.5-flash-preview, gemini-1.5-pro-preview, gemini-pro", 
                 validator=loader.validators.String()
             ),
             loader.ConfigValue(
@@ -81,16 +101,26 @@ class SunshineGPT(loader.Module):
                 "Инструкция для Gemini AI", 
                 validator=loader.validators.String()
             ),
+            
+            # Настройки для генерации изображений
             loader.ConfigValue(
-                "proxy", 
-                "", 
-                "Прокси в формате http://<user>:<pass>@<proxy>:<port>, или http://<proxy>:<port>", 
-                validator=loader.validators.String()
+                "api_key_image", 
+                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c", 
+                "Ключ для API генерации изображений (не изменяйте)", 
+                validator=loader.validators.Hidden(loader.validators.String())
             ),
             loader.ConfigValue(
                 "default_image_model", 
                 "flux", 
-                "Модель для генерации изображений. Примеры: sdxl-turbo, flux, flux-pro, flux-dev, flux-schnell, dall-e-3, midjourney", 
+                "Модель для генерации изображений. Примеры: flux, flux-pro, flux-dev, dall-e-3, midjourney", 
+                validator=loader.validators.String()
+            ),
+            
+            # Общие настройки
+            loader.ConfigValue(
+                "proxy", 
+                "", 
+                "Прокси в формате http://<user>:<pass>@<proxy>:<port>, или http://<proxy>:<port>", 
                 validator=loader.validators.String()
             ),
             loader.ConfigValue(
@@ -111,7 +141,21 @@ class SunshineGPT(loader.Module):
                 "Количество сообщений для анализа истории", 
                 validator=loader.validators.Integer(minimum=50, maximum=1000)
             ),
+            loader.ConfigValue(
+                "gemini_stream", 
+                False, 
+                "Использовать потоковую передачу ответов от Gemini (экспериментально)", 
+                validator=loader.validators.Boolean()
+            ),
+            loader.ConfigValue(
+                "temperature", 
+                0.7, 
+                "Температура для генерации (0.0 - точные ответы, 1.0 - творческие)", 
+                validator=loader.validators.Float(minimum=0.0, maximum=1.0)
+            ),
         )
+        
+        # Список эмодзи для разнообразия ответов
         self.emojis = [
             "<emoji document_id=5440588507254896965>🤨</emoji>",
             "<emoji document_id=5443135817998416433>😕</emoji>",
@@ -197,41 +241,12 @@ class SunshineGPT(loader.Module):
             "<emoji document_id=5449728399524249126>🐻</emoji>",
             "<emoji document_id=5447440066718743386>🍺</emoji>",
             "<emoji document_id=5447153218737949833>🤦</emoji>",
-            "<emoji document_id=5447223407093497907>☺️</emoji>",
-            "<emoji document_id=5447482135923406987>🌺</emoji>",
-            "<emoji document_id=5447118373668274107>😈</emoji>",
-            "<emoji document_id=5447504955084652371>⚰️</emoji>",
-            "<emoji document_id=5449461939753204225>🤩</emoji>",
-            "<emoji document_id=5449918091049844581>🆒</emoji>",
-            "<emoji document_id=5449356850493406098>❄️</emoji>",
-            "<emoji document_id=5447103766484499962>😂</emoji>",
-            "<emoji document_id=5382065579232347995>🙄</emoji>",
-            "<emoji document_id=5382255777564083766>😒</emoji>",
-            "<emoji document_id=5382160888851615895>😄</emoji>",
-            "<emoji document_id=5382243558382144304>👆</emoji>",
-            "<emoji document_id=5381982145197654105>😨</emoji>",
-            "<emoji document_id=5262687736334139937>🤐</emoji>",
-            "<emoji document_id=5265154593750271127>😊</emoji>",
-            "<emoji document_id=5265180513877903121>😕</emoji>",
-            "<emoji document_id=5292183561678375848>😁</emoji>",
-            "<emoji document_id=5292092972228169457>😧</emoji>",
-            "<emoji document_id=5294439768128508029>☺️</emoji>",
-            "<emoji document_id=5291813515886089464>🎩</emoji>",
-            "<emoji document_id=5294269446905416769>😎</emoji>",
-            "<emoji document_id=5278474666019665313>🌟</emoji>",
-            "<emoji document_id=5278273197693743570>🌟</emoji>",
-            "<emoji document_id=5278340607205453195>🌟</emoji>",
-            "<emoji document_id=5319299223521338293>😱</emoji>",
-            "<emoji document_id=5319055531371930585>🙅‍♂️</emoji>",
-            "<emoji document_id=5319016550248751722>👋</emoji>",
-            "<emoji document_id=5318773107207447403>😱</emoji>",
-            "<emoji document_id=5319018096436977294>🔫</emoji>",
-            "<emoji document_id=5319116781900538765>😣</emoji>",
-            "<emoji document_id=5229159576649093081>❤️</emoji>",
-            "<emoji document_id=5456439526442409796>👍</emoji>",
-            "<emoji document_id=5458837140395793861>👎</emoji>",
-            "<emoji document_id=5456307778320603813>😏</emoji>"
+            "<emoji document_id=5447223407093497907>☺️</emoji>"
         ]
+        
+        # Временный кэш для обработанных запросов
+        self._request_cache = {}
+        self._gemini_model = None
 
     async def client_ready(self, client, db):
         """Инициализация клиента"""
@@ -259,23 +274,83 @@ class SunshineGPT(loader.Module):
                 return "image/png"
             elif getattr(message, "sticker", None):
                 return "image/webp"
+            elif getattr(message, "document", None):
+                # Попытка определить тип по имени файла
+                file_name = getattr(message.document, "file_name", "").lower()
+                if file_name.endswith((".jpg", ".jpeg")):
+                    return "image/jpeg"
+                elif file_name.endswith(".png"):
+                    return "image/png"
+                elif file_name.endswith(".gif"):
+                    return "image/gif"
+                elif file_name.endswith((".mp4", ".avi", ".mov")):
+                    return "video/mp4"
+                elif file_name.endswith((".mp3", ".wav", ".ogg")):
+                    return "audio/mpeg"
+                
         except AttributeError as e:
             logger.error(f"Error getting mime type: {e}")
             return None
 
         return None
 
-    async def _setup_genai(self) -> None:
-        """Настраивает Gemini API с заданным ключом"""
-        if not self.config["api_key"]:
-            raise ValueError("API ключ не указан")
-        
-        genai.configure(api_key=self.config["api_key"])
-
     async def _get_random_emoji(self) -> str:
         """Возвращает случайный эмодзи из списка"""
         return random.choice(self.emojis)
 
+    async def _setup_gemini(self) -> genai.GenerativeModel:
+        """Настраивает Gemini API с заданным ключом и возвращает модель"""
+        if not self.config["api_key"]:
+            raise ValueError("API ключ не указан")
+        
+        # Настраиваем API с ключом
+        genai.configure(api_key=self.config["api_key"])
+        
+        # Создаем модель с инструкцией и температурой
+        return genai.GenerativeModel(
+            model_name=self.config["model_name"],
+            system_instruction=self.config["system_instruction"] or None,
+            generation_config={"temperature": self.config["temperature"]}
+        )
+
+    def _get_request_cache_key(self, prompt: str, media_path: Optional[str] = None) -> str:
+        """Создает уникальный ключ для кэширования запроса"""
+        key_components = [prompt]
+        
+        if media_path and os.path.exists(media_path):
+            # Добавляем хеш содержимого файла для медиа
+            try:
+                with open(media_path, "rb") as f:
+                    file_hash = hashlib.md5(f.read()).hexdigest()
+                key_components.append(file_hash)
+            except Exception as e:
+                logger.error(f"Error hashing media file: {e}")
+                # Если не удалось получить хеш, добавляем путь
+                key_components.append(media_path)
+        
+        return hashlib.md5(":".join(key_components).encode()).hexdigest()
+
+    @retry_decorator()
+    async def _process_gemini_query(self, content_parts, stream=False):
+        """Обрабатывает запрос к Gemini API"""
+        model = await self._setup_gemini()
+        
+        if stream and self.config["gemini_stream"]:
+            # Потоковая генерация
+            response_stream = model.generate_content(content_parts, stream=True)
+            full_response = ""
+            
+            async for chunk in response_stream:
+                if chunk.text:
+                    full_response += chunk.text
+                    
+            return full_response.strip() or self.strings["empty_response"]
+        else:
+            # Обычная генерация
+            response = model.generate_content(content_parts)
+            return response.text.strip() if response.text else self.strings["empty_response"]
+
+    @retry_decorator(max_retries=3)
     async def generate_image(self, prompt: str) -> Tuple[Optional[str], Union[float, str]]:
         """Генерация изображения с API"""
         start_time = time.time()
@@ -296,73 +371,34 @@ class SunshineGPT(loader.Module):
             "Content-Type": "application/json"
         }
 
-        for attempt in range(self.config["max_retries"]):
-            try:
-                async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
-                    async with session.post(
-                        "https://api.kshteam.top/v1/images/generate", 
-                        headers=headers, 
-                        json=payload, 
-                        proxy=http_proxy
-                    ) as response:
-                        generation_time = round(time.time() - start_time, 2)
-                        
-                        if response.status == 200:
-                            data = await response.json()
-                            image_url = data.get("data", [{}])[0].get("url", None)
+        async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
+            async with session.post(
+                "https://api.kshteam.top/v1/images/generate", 
+                headers=headers, 
+                json=payload, 
+                proxy=http_proxy
+            ) as response:
+                generation_time = round(time.time() - start_time, 2)
+                
+                if response.status == 200:
+                    data = await response.json()
+                    image_url = data.get("data", [{}])[0].get("url", None)
 
-                            if image_url:
-                                logger.info(f"Image generated successfully in {generation_time}s")
-                                return image_url, generation_time
-                            else:
-                                error_msg = "Ошибка получения URL изображения"
-                                logger.error(error_msg)
-                                return None, error_msg
-                        elif response.status == 429:
-                            wait_time = 2 ** attempt
-                            logger.warning(f"Rate limited, retrying in {wait_time}s (attempt {attempt+1}/{self.config['max_retries']})")
-                            await asyncio.sleep(wait_time)
-                            continue
-                        else:
-                            error_msg = f"Ошибка сервера: {response.status}"
-                            logger.error(f"Server error: {response.status} - {await response.text()}")
-                            return None, error_msg
-            except asyncio.TimeoutError:
-                logger.error(f"Request timeout (attempt {attempt+1}/{self.config['max_retries']})")
-                if attempt == self.config["max_retries"] - 1:
-                    return None, "Таймаут запроса к серверу"
-                await asyncio.sleep(2 ** attempt)
-            except Exception as e:
-                logger.exception(f"Error generating image: {str(e)}")
-                return None, f"Ошибка: {str(e)}"
+                    if image_url:
+                        logger.info(f"Image generated successfully in {generation_time}s")
+                        return image_url, generation_time
+                    else:
+                        error_msg = "Ошибка получения URL изображения"
+                        logger.error(error_msg)
+                        return None, error_msg
+                else:
+                    error_msg = f"Ошибка сервера: {response.status}"
+                    logger.error(f"Server error: {response.status} - {await response.text()}")
+                    return None, error_msg
 
-        return None, "Превышено максимальное количество попыток"
-
-    async def _process_gemini_query(self, content_parts, model_name=None) -> str:
-        """Обрабатывает запрос к Gemini API с повторными попытками"""
-        if not model_name:
-            model_name = self.config["model_name"]
-            
-        await self._setup_genai()
-        
-        model = genai.GenerativeModel(
-            model_name=model_name,
-            system_instruction=self.config["system_instruction"] or None,
-        )
-
-        for attempt in range(self.config["max_retries"]):
-            try:
-                response = model.generate_content(content_parts)
-                return response.text.strip() if response.text else self.strings["empty_response"]
-            except Exception as e:
-                logger.error(f"Gemini API error (attempt {attempt+1}): {str(e)}")
-                if attempt == self.config["max_retries"] - 1:
-                    raise
-                await asyncio.sleep(2 ** attempt)  # Экспоненциальная задержка
-
-    @loader.command()
-    async def gptcmd(self, message):
-        """— отправить запрос к Gemini"""
+    @loader.command(alias="gpt")
+    async def gpt(self, message):
+        """— отправить запрос к Gemini AI"""
         if not self.config["api_key"]:
             await utils.answer(message, self.strings["no_api_key"])
             return
@@ -402,35 +438,55 @@ class SunshineGPT(loader.Module):
 
             await utils.answer(message, self.strings["request_sent"])
 
-            content_parts = []
-            if prompt:
-                content_parts.append(genai.protos.Part(text=prompt))
+            # Проверяем кэш для одинаковых запросов
+            cache_key = self._get_request_cache_key(prompt, media_path)
+            if cache_key in self._request_cache:
+                reply_text = self._request_cache[cache_key]
+                logger.info("Using cached response")
+            else:
+                # Формируем части запроса для Gemini
+                content_parts = []
+                if prompt:
+                    content_parts.append(genai.protos.Part(text=prompt))
 
-            if media_path:
-                with open(media_path, "rb") as f:
-                    content_parts.append(genai.protos.Part(
-                        inline_data=genai.protos.Blob(
-                            mime_type=mime_type,
-                            data=f.read()
-                        )
-                    ))
+                if media_path:
+                    with open(media_path, "rb") as f:
+                        content_parts.append(genai.protos.Part(
+                            inline_data=genai.protos.Blob(
+                                mime_type=mime_type,
+                                data=f.read()
+                            )
+                        ))
 
-            if not content_parts:
-                await utils.answer(message, self.strings["empty_content"])
-                return
+                if not content_parts:
+                    await utils.answer(message, self.strings["empty_content"])
+                    return
 
-            reply_text = await self._process_gemini_query(content_parts)
+                # Отправляем запрос с учетом настройки потоковой передачи
+                reply_text = await self._process_gemini_query(content_parts, stream=self.config["gemini_stream"])
+                
+                # Кэшируем ответ (ограничиваем размер кэша)
+                if len(self._request_cache) > 50:  # Ограничиваем кэш до 50 запросов
+                    # Удаляем старый элемент
+                    try:
+                        oldest_key = next(iter(self._request_cache))
+                        del self._request_cache[oldest_key]
+                    except (StopIteration, KeyError):
+                        pass
+                        
+                self._request_cache[cache_key] = reply_text
+
             random_emoji = await self._get_random_emoji()
 
             if show_question and prompt != "Опиши это":
-                response = f"<emoji document_id=5443038326535759644>💬</emoji> <b>Вопрос:</b> {prompt}\n\n<emoji document_id=5325547803936572038>✨</emoji> <b>Ответ от Gemini:</b> {reply_text} {random_emoji}"
+                response = f"{self.strings['question'].format(prompt)}\n\n{self.strings['gemini_response'].format(reply_text, random_emoji)}"
             else:
-                response = f"\n<emoji document_id=5325547803936572038>✨</emoji> <b>Ответ от Gemini:</b> {reply_text} {random_emoji}"
+                response = f"\n{self.strings['gemini_response'].format(reply_text, random_emoji)}"
             
             await utils.answer(message, response)
             
         except Exception as e:
-            logger.exception(f"Error in gptcmd: {e}")
+            logger.exception(f"Error in gemini command: {e}")
             await utils.answer(message, self.strings["error"].format(e))
         finally:
             if media_path and os.path.exists(media_path):
@@ -461,7 +517,7 @@ class SunshineGPT(loader.Module):
                             return
                             
                         img_content = io.BytesIO(await img_response.read())
-                        img_content.name = "generated_image.png"
+                        img_content.name = f"generated_image_{int(time.time())}.png"
 
                         caption = self.strings["image_caption"].format(
                             prompt=prompt,
@@ -479,7 +535,7 @@ class SunshineGPT(loader.Module):
 
     @loader.command()
     async def ghist(self, message):
-        """– анализ последних сообщений чата"""
+        """- анализ сообщений чата или пользователя (можно с ответом на сообщение)"""
         if not self.config["api_key"]:
             await utils.answer(message, self.strings["no_api_key"])
             return
@@ -490,7 +546,7 @@ class SunshineGPT(loader.Module):
         
         if message.is_reply:
             reply = await message.get_reply_message()
-            user = reply.sender.username if reply.sender else None
+            user = reply.sender_id if reply.sender else None
             user_name = reply.sender.first_name if reply.sender else "Пользователь"
             if user:
                 await utils.answer(message, self.strings["collecting_history"].format(user_name))
@@ -504,17 +560,21 @@ class SunshineGPT(loader.Module):
             all_messages = []
             
             total_collected = 0
-            async for msg in self.client.iter_messages(chat_id, limit=history_limit):
+            async for msg in self.client.iter_messages(chat_id, limit=history_limit * 2):  # Увеличиваем лимит для лучшего сбора
                 if msg and msg.sender and not getattr(msg.sender, "bot", False) and not msg.action:
+                    sender_id = msg.sender_id if hasattr(msg, "sender_id") else 0
                     sender_name = msg.sender.first_name if hasattr(msg.sender, "first_name") else "Unknown"
-                    sender_username = msg.sender.username if hasattr(msg.sender, "username") else None
                     
-                    if user and sender_username != user:
+                    if user and sender_id != user:
                         continue
                         
                     msg_text = msg.text if msg.text else ""
                     if not msg_text and msg.media:
                         msg_text = "[медиа]"
+                    
+                    # Пропускаем пустые сообщения
+                    if not msg_text:
+                        continue
                     
                     message_data = {
                         "sender": sender_name,
@@ -532,18 +592,23 @@ class SunshineGPT(loader.Module):
                 await utils.answer(message, self.strings["error"].format("Не найдено подходящих сообщений"))
                 return
                 
+            # Сортируем сообщения по времени
             all_messages.sort(key=lambda x: x["time"])
             
-            context = "Ниже представлена история сообщений из чата. "
+            # Готовим контекст для анализа
+            context = "Ниже представлена история сообщений из чата Telegram. "
             if user:
                 context += f"Проанализируй все сообщения пользователя {user_name} и составь краткую сводку о чем он писал сегодня, "
-                context += "его интересах, вопросах, общем настроении. Выдели основные темы обсуждения. В конце напиши шутку про то что ты прочитал и запиши как Шутка от ИИ."
+                context += "его интересах, вопросах, общем настроении. Выдели основные темы обсуждения. "
+                context += "В конце напиши шутку про то что ты прочитал и запиши как 'Шутка от ИИ:'"
                 title = self.strings["user_analysis_title"].format(user_name)
             else:
                 context += "Проанализируй все сообщения и составь краткую сводку о том, что обсуждалось в чате сегодня. "
-                context += "Выдели основные темы обсуждения, активных участников, общее настроение беседы. В конце напиши шутку про то что ты прочитал и запиши как Шутка от ИИ."
+                context += "Выдели основные темы обсуждения, активных участников, общее настроение беседы. "
+                context += "В конце напиши шутку про то что ты прочитал и запиши как 'Шутка от ИИ:'"
                 title = self.strings["chat_analysis_title"]
                 
+            # Формируем текст истории для анализа
             history_text = "\n".join([f"[{msg['time']}] {msg['sender']}: {msg['text']}" for msg in all_messages])
             
             prompt = f"{context}\n\nИстория сообщений:\n{history_text}"
@@ -553,6 +618,7 @@ class SunshineGPT(loader.Module):
                 self.strings["processing"].format("Анализирую сообщения...")
             )
             
+            # Отправляем запрос к Gemini
             content_parts = [genai.protos.Part(text=prompt)]
             analysis = await self._process_gemini_query(content_parts)
             
@@ -564,3 +630,23 @@ class SunshineGPT(loader.Module):
         except Exception as e:
             logger.exception(f"Error in ghist: {e}")
             await utils.answer(message, self.strings["error"].format(e))
+
+    @loader.command()
+    async def gmodels(self, message):
+        """— список доступных моделей Gemini"""
+        models = [
+            "gemini-1.5-flash", 
+            "gemini-1.5-pro", 
+            "gemini-1.5-flash-preview", 
+            "gemini-1.5-pro-preview",
+            "gemini-pro",
+            "gemini-pro-vision"
+        ]
+        
+        models_text = "\n".join([f"• <code>{model}</code>" for model in models])
+        await utils.answer(message, self.strings["gemini_models"].format(models_text, self.config["model_name"]))
+
+    @loader.command()
+    async def ghelp(self, message):
+        """— показать справку по модулю"""
+        await utils.answer(message, self.strings["help_text"])
