@@ -25,6 +25,7 @@ from functools import wraps, lru_cache
 from PIL import Image
 from .. import loader, utils
 import aiohttp
+from telethon import events
 
 
 logger = logging.getLogger(__name__)
@@ -72,12 +73,17 @@ class SunshineGPT(loader.Module):
         "collecting_chat": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>Собираю историю чата...</b>",
         "user_analysis_title": "<emoji document_id=5873121512445187130>❓</emoji> <b>Что сегодня обсуждал {}?</b>",
         "chat_analysis_title": "<emoji document_id=5873121512445187130>❓</emoji> <b>Что сегодня обсуждали участники чата?</b>",
-        "empty_media": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Не удалось открыть изображение:</b> {}",
+        "empty_media": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Не удалось открыть медиа:</b> {}",
         "empty_content": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Ошибка: Запрос должен содержать текст или медиа.</b>",
         "gemini_response": "<emoji document_id=5325547803936572038>✨</emoji> <b>Ответ от Gemini:</b> {} {}",
         "question": "<emoji document_id=5443038326535759644>💬</emoji> <b>Вопрос:</b> {}",
         "gemini_models": "<emoji document_id=5325547803936572038>✨</emoji> <b>Доступные модели Gemini:</b>\n\n{}\n\n<b>Текущая модель:</b> <code>{}</code>\n\n<b>Для изменения модели используйте:</b>\n<code>.config SunshineGPT model_name новая_модель</code>",
-        "help_text": "<emoji document_id=5325547803936572038>✨</emoji> <b>SunshineGPT</b>\n\n<b>Основные команды:</b>\n• <code>.gpt запрос</code> - отправить запрос к Gemini\n• <code>.gimg промпт</code> - сгенерировать изображение\n• <code>.ghist</code> - анализ истории чата (можно с ответом на сообщение)\n• <code>.gmodels</code> - показать доступные модели Gemini\n• <code>.ghelp</code> - показать эту справку\n\n<b>Работа с медиа:</b>\nОтветьте на изображение/видео/стикер с командой <code>.gpt</code>"
+        "help_text": "<emoji document_id=5325547803936572038>✨</emoji> <b>SunshineGPT</b>\n\n<b>Основные команды:</b>\n• <code>.gpt запрос</code> - отправить запрос к Gemini\n• <code>.gimg промпт</code> - сгенерировать изображение\n• <code>.ghist</code> - анализ истории чата (можно с ответом на сообщение)\n• <code>.gmodels</code> - показать доступные модели Gemini\n• <code>.ghelp</code> - показать эту справку\n\n<b>Работа с медиа:</b>\nОтветьте на изображение/видео/стикер с командой <code>.gpt</code>\n\n<b>Автообработка сообщений:</b>\nМодуль может автоматически обрабатывать сообщения при упоминании бота",
+        "auto_processing_enabled": "<emoji document_id=5325547803936572038>✨</emoji> <b>Автоматическая обработка сообщений включена</b>",
+        "auto_processing_disabled": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Автоматическая обработка сообщений отключена</b>",
+        "processing_media": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>Обрабатываю медиа...</b>",
+        "audio_transcribing": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>Транскрибирую аудио...</b>",
+        "video_analyzing": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>Анализирую видео...</b>",
     }
 
     def __init__(self):
@@ -152,6 +158,31 @@ class SunshineGPT(loader.Module):
                 0.7, 
                 "Температура для генерации (0.0 - точные ответы, 1.0 - творческие)", 
                 validator=loader.validators.Float(minimum=0.0, maximum=1.0)
+            ),
+            # Новые настройки для автоматической обработки
+            loader.ConfigValue(
+                "auto_processing", 
+                True, 
+                "Автоматически обрабатывать сообщения при упоминании бота", 
+                validator=loader.validators.Boolean()
+            ),
+            loader.ConfigValue(
+                "default_prompt", 
+                "Опиши это", 
+                "Стандартный запрос для обработки медиа без текста", 
+                validator=loader.validators.String()
+            ),
+            loader.ConfigValue(
+                "media_auto_process", 
+                True, 
+                "Автоматически обрабатывать медиа файлы", 
+                validator=loader.validators.Boolean()
+            ),
+            loader.ConfigValue(
+                "voice_transcription", 
+                True, 
+                "Транскрибировать голосовые сообщения", 
+                validator=loader.validators.Boolean()
             ),
         )
         
@@ -247,6 +278,8 @@ class SunshineGPT(loader.Module):
         # Временный кэш для обработанных запросов
         self._request_cache = {}
         self._gemini_model = None
+        self._me = None
+        self._is_bot_mentioned = False
 
     async def client_ready(self, client, db):
         """Инициализация клиента"""
@@ -257,6 +290,170 @@ class SunshineGPT(loader.Module):
             os.environ["HTTP_PROXY"] = self.config["proxy"]
             os.environ["HTTPS_PROXY"] = self.config["proxy"]
             logger.info(f"Proxy set to {self.config['proxy']}")
+            
+        # Получаем информацию о нашем пользователе/боте
+        self._me = await client.get_me()
+        
+        # Регистрируем обработчик для всех входящих сообщений
+        client.add_event_handler(
+            self._message_handler, 
+            events.NewMessage(incoming=True)
+        )
+        
+        logger.info("SunshineGPT автоматическая обработка сообщений инициализирована")
+
+    async def _message_handler(self, event):
+        """Обработчик всех входящих сообщений"""
+        
+        # Пропускаем, если автоматическая обработка отключена
+        if not self.config["auto_processing"]:
+            return
+            
+        # Проверяем, что API ключ указан
+        if not self.config["api_key"]:
+            return
+            
+        # Получаем объект сообщения
+        message = event.message
+        
+        # Проверяем упоминание бота
+        if self._me:
+            # Проверка текстового упоминания
+            if message.text:
+                # Проверяем упоминание по имени пользователя или имени бота
+                bot_username = self._me.username if self._me.username else ""
+                bot_firstname = self._me.first_name if self._me.first_name else ""
+                
+                mentioned = False
+                
+                # Проверка прямого упоминания через @username
+                if bot_username and f"@{bot_username}" in message.text.lower():
+                    mentioned = True
+                    
+                # Проверка упоминания по имени
+                if bot_firstname and bot_firstname.lower() in message.text.lower():
+                    mentioned = True
+                    
+                if not mentioned:
+                    # Проверяем, есть ли медиа контент, который мы должны обработать автоматически
+                    if not self.config["media_auto_process"]:
+                        return
+                        
+                    # Проверка наличия медиа в сообщении
+                    if not (message.media or getattr(message, "voice", None) or 
+                            getattr(message, "video", None) or getattr(message, "audio", None) or
+                            getattr(message, "photo", None) or getattr(message, "document", None) or
+                            getattr(message, "sticker", None) or getattr(message, "video_note", None)):
+                        return
+            else:
+                # Если нет текста, но есть медиа и настройка включена
+                if not self.config["media_auto_process"]:
+                    return
+                    
+                # Проверяем наличие медиа для автоматической обработки
+                if not (message.media or getattr(message, "voice", None) or 
+                        getattr(message, "video", None) or getattr(message, "audio", None) or
+                        getattr(message, "photo", None) or getattr(message, "document", None) or
+                        getattr(message, "sticker", None) or getattr(message, "video_note", None)):
+                    return
+                        
+        # Обрабатываем сообщение
+        await self._process_message(message)
+
+    async def _process_message(self, message):
+        """Обрабатывает сообщение и отправляет ответ от AI"""
+        try:
+            # Определяем тип медиа
+            mime_type = self._get_mime_type(message)
+            media_path = None
+            prompt = message.text if message.text else self.config["default_prompt"]
+            
+            # Специальное сообщение в зависимости от типа медиа
+            if mime_type:
+                if mime_type.startswith("audio"):
+                    status_msg = await message.reply(self.strings["audio_transcribing"])
+                elif mime_type.startswith("video"):
+                    status_msg = await message.reply(self.strings["video_analyzing"])
+                else:
+                    status_msg = await message.reply(self.strings["processing_media"])
+                    
+                # Скачиваем медиа
+                media_path = await message.download_media()
+                
+                # Если это изображение, попробуем открыть его
+                if mime_type.startswith("image"):
+                    try:
+                        img = Image.open(media_path)
+                    except Exception as e:
+                        await status_msg.edit(self.strings["empty_media"].format(e))
+                        if media_path and os.path.exists(media_path):
+                            with suppress(Exception):
+                                os.remove(media_path)
+                        return
+            else:
+                # Если нет медиа, просто отправляем запрос
+                status_msg = await message.reply(self.strings["request_sent"])
+                
+            # Формируем запрос к Gemini
+            content_parts = []
+            if prompt:
+                content_parts.append(genai.protos.Part(text=prompt))
+                
+            if media_path:
+                with open(media_path, "rb") as f:
+                    content_parts.append(genai.protos.Part(
+                        inline_data=genai.protos.Blob(
+                            mime_type=mime_type,
+                            data=f.read()
+                        )
+                    ))
+                    
+            if not content_parts:
+                await status_msg.edit(self.strings["empty_content"])
+                return
+                
+            # Кэширование запроса
+            cache_key = self._get_request_cache_key(prompt, media_path)
+            if cache_key in self._request_cache:
+                reply_text = self._request_cache[cache_key]
+                logger.info("Using cached response")
+            else:
+                # Отправляем запрос с учетом настройки потоковой передачи
+                reply_text = await self._process_gemini_query(content_parts, stream=self.config["gemini_stream"])
+                
+                # Кэшируем ответ (ограничиваем размер кэша)
+                if len(self._request_cache) > 50:
+                    # Удаляем старый элемент
+                    try:
+                        oldest_key = next(iter(self._request_cache))
+                        del self._request_cache[oldest_key]
+                    except (StopIteration, KeyError):
+                        pass
+                        
+                self._request_cache[cache_key] = reply_text
+                
+            random_emoji = await self._get_random_emoji()
+            
+            # Формируем ответ, включая исходный запрос при необходимости
+            if prompt != self.config["default_prompt"]:
+                response = f"{self.strings['question'].format(prompt)}\n\n{self.strings['gemini_response'].format(reply_text, random_emoji)}"
+            else:
+                response = f"\n{self.strings['gemini_response'].format(reply_text, random_emoji)}"
+                
+            # Отправляем ответ
+            await status_msg.edit(response)
+            
+        except Exception as e:
+            logger.exception(f"Error in _process_message: {e}")
+            try:
+                await message.reply(self.strings["error"].format(e))
+            except Exception:
+                pass
+        finally:
+            # Очистка временных файлов
+            if media_path and os.path.exists(media_path):
+                with suppress(Exception):
+                    os.remove(media_path)
 
     def _get_mime_type(self, message) -> Optional[str]:
         """Определяет MIME-тип медиа в сообщении"""
@@ -287,6 +484,19 @@ class SunshineGPT(loader.Module):
                     return "video/mp4"
                 elif file_name.endswith((".mp3", ".wav", ".ogg")):
                     return "audio/mpeg"
+                # Дополнительные типы документов
+                elif file_name.endswith((".pdf")):
+                    return "application/pdf"
+                elif file_name.endswith((".doc", ".docx")):
+                    return "application/msword"
+                elif file_name.endswith((".xls", ".xlsx")):
+                    return "application/vnd.ms-excel"
+                elif file_name.endswith((".ppt", ".pptx")):
+                    return "application/vnd.ms-powerpoint"
+                # Если не смогли определить по расширению, пробуем по MIME типу
+                mime_type = getattr(message.document, "mime_type", None)
+                if mime_type:
+                    return mime_type
                 
         except AttributeError as e:
             logger.error(f"Error getting mime type: {e}")
@@ -650,3 +860,13 @@ class SunshineGPT(loader.Module):
     async def ghelp(self, message):
         """— показать справку по модулю"""
         await utils.answer(message, self.strings["help_text"])
+
+    @loader.command()
+    async def gauto(self, message):
+        """— включить/выключить автоматическую обработку сообщений"""
+        self.config["auto_processing"] = not self.config["auto_processing"]
+        
+        if self.config["auto_processing"]:
+            await utils.answer(message, self.strings["auto_processing_enabled"])
+        else:
+            await utils.answer(message, self.strings["auto_processing_disabled"])
