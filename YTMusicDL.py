@@ -10,6 +10,8 @@ import asyncio
 import aiohttp
 import logging
 import tempfile
+import random
+import time
 from urllib.parse import urlparse, parse_qs, quote_plus
 
 from telethon import events
@@ -33,12 +35,14 @@ class YTMusicDLMod(loader.Module):
         "no_results": "<b><emoji document_id=5210952531676504517>❌</emoji> <i>По запросу</i> <code>{}</code> <i>ничего не найдено</i></b>",
         "processing": "<b><emoji document_id=5341715473882955310>⚙️</emoji> <i>Обработка...</i></b>",
         "starting": "<b><emoji document_id=5188481279963715781>🚀</emoji> <i>Начинаю загрузку...</i></b>",
-        "config_service": "Сервис для скачивания (y2mate, ytmp3)",
+        "analyzing": "<b><emoji document_id=5341715473882955310>⚙️</emoji> <i>Анализ видео...</i></b>",
+        "service_error": "<b><emoji document_id=5210952531676504517>❌</emoji> <i>Сервис</i> <code>{}</code> <i>не смог обработать запрос. Пробую другой сервис...</i></b>",
+        "config_service": "Сервис для скачивания (savefrom, y2down, notube, auto)",
     }
     
     def __init__(self):
         self.config = loader.ModuleConfig(
-            "service", "y2mate", lambda: self.strings["config_service"],
+            "service", "auto", lambda: self.strings["config_service"],
         )
     
     async def client_ready(self, client, db):
@@ -46,10 +50,22 @@ class YTMusicDLMod(loader.Module):
         self.client = client
         self.db = db
         self.session = aiohttp.ClientSession()
+        # Добавляем случайные User-Agent для обхода блокировок
+        self.user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0"
+        ]
     
     async def on_unload(self):
         """Вызывается при выгрузке модуля"""
         await self.session.close()
+    
+    def _get_random_user_agent(self):
+        """Возвращает случайный User-Agent из списка"""
+        return random.choice(self.user_agents)
     
     @loader.owner
     @loader.command(ru_doc="[ссылка или название] - Скачать музыку с YouTube")
@@ -93,18 +109,47 @@ class YTMusicDLMod(loader.Module):
         await utils.answer(status_message, self.strings["processing"])
         
         service = self.config["service"].lower()
+        result = None
         
         try:
-            if service == "y2mate":
-                result = await self._download_via_y2mate(video_id, status_message)
-            elif service == "ytmp3":
-                result = await self._download_via_ytmp3(video_id, status_message)
+            # Определяем порядок попытки сервисов
+            services_to_try = []
+            if service == "auto":
+                # Пробуем все сервисы в определенном порядке
+                services_to_try = ["savefrom", "y2down", "notube"]
             else:
-                # По умолчанию используем y2mate
-                result = await self._download_via_y2mate(video_id, status_message)
+                # Сначала пробуем выбранный сервис, затем остальные
+                services_to_try = [service]
+                for s in ["savefrom", "y2down", "notube"]:
+                    if s != service:
+                        services_to_try.append(s)
+            
+            # Поочередно пробуем каждый сервис
+            for current_service in services_to_try:
+                try:
+                    await utils.answer(status_message, f"<b><emoji document_id=5341715473882955310>⚙️</emoji> <i>Загрузка через {current_service}...</i></b>")
+                    
+                    if current_service == "savefrom":
+                        result = await self._download_via_savefrom(video_id, video_url, status_message)
+                    elif current_service == "y2down":
+                        result = await self._download_via_y2down(video_id, video_url, status_message)
+                    elif current_service == "notube":
+                        result = await self._download_via_notube(video_id, video_url, status_message)
+                    
+                    if result:
+                        # Если сервис успешно скачал файл, останавливаем цикл
+                        break
+                    else:
+                        # Если сервис не смог скачать, сообщаем и пробуем следующий
+                        await utils.answer(status_message, self.strings["service_error"].format(current_service))
+                except Exception as e:
+                    logger.error(f"Ошибка при загрузке с {current_service}: {e}")
+                    await utils.answer(status_message, self.strings["service_error"].format(current_service))
+                    # Немного подождем перед следующей попыткой
+                    await asyncio.sleep(1)
             
             if not result:
-                await utils.answer(status_message, self.strings["error"].format("Не удалось скачать трек"))
+                await utils.answer(status_message, self.strings["error"].format("Ни один из сервисов не смог скачать трек"))
                 return
             
             file_path, title, artist, duration = result
@@ -138,34 +183,10 @@ class YTMusicDLMod(loader.Module):
     async def _search_youtube(self, query):
         """Поиск видео на YouTube по названию"""
         try:
-            # Используем API поиска YouTube через rapidapi.com
-            url = "https://youtube-search-results.p.rapidapi.com/youtube-search/"
-            headers = {
-                "X-RapidAPI-Key": "97dfc61813mshbbc2e7e25948efcp10fcc0jsn1ba92610f3e5",  # Бесплатный ключ для примера
-                "X-RapidAPI-Host": "youtube-search-results.p.rapidapi.com"
-            }
-            params = {"q": query}
-            
-            async with self.session.get(url, headers=headers, params=params) as response:
-                if response.status != 200:
-                    # Альтернативный метод, если API не работает
-                    return await self._search_youtube_alternative(query)
-                
-                data = await response.json()
-                if "videos" in data and data["videos"]:
-                    return data["videos"][0]["id"]
-                return None
-        except:
-            # Если что-то пошло не так, используем альтернативный метод
-            return await self._search_youtube_alternative(query)
-    
-    async def _search_youtube_alternative(self, query):
-        """Альтернативный метод поиска видео на YouTube"""
-        try:
             search_url = f"https://www.youtube.com/results?search_query={quote_plus(query)}"
             
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+                "User-Agent": self._get_random_user_agent(),
                 "Accept-Language": "en-US,en;q=0.9",
             }
             
@@ -181,127 +202,60 @@ class YTMusicDLMod(loader.Module):
                     return video_ids[0]
                 return None
         except Exception as e:
-            logger.error(f"Ошибка альтернативного поиска: {e}")
+            logger.error(f"Ошибка поиска на YouTube: {e}")
             return None
     
-    async def _download_via_y2mate(self, video_id, status_message):
-        """Скачивание через сервис y2mate.com"""
+    async def _download_via_savefrom(self, video_id, video_url, status_message):
+        """Скачивание через сервис savefrom.net"""
         try:
-            # Шаг 1: Анализ видео
-            analyze_url = "https://www.y2mate.com/mates/analyzeV2/ajax"
-            analyze_data = {
-                "k_query": f"https://www.youtube.com/watch?v={video_id}",
-                "k_page": "home",
-                "hl": "en",
-                "q_auto": 0
+            await utils.answer(status_message, self.strings["analyzing"])
+            
+            api_url = "https://ssyoutube.com/api/convert"
+            headers = {
+                "User-Agent": self._get_random_user_agent(),
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Origin": "https://ssyoutube.com",
+                "Referer": "https://ssyoutube.com/",
             }
             
-            await utils.answer(status_message, "<b><emoji document_id=5341715473882955310>⚙️</emoji> <i>Анализ видео...</i></b>")
+            data = {
+                "url": video_url
+            }
             
-            async with self.session.post(analyze_url, data=analyze_data) as response:
+            async with self.session.post(api_url, headers=headers, json=data) as response:
                 if response.status != 200:
                     return None
                 
-                analyze_result = await response.json()
-                if not analyze_result.get("status") == "ok":
+                result = await response.json()
+                if not result or "url" not in result:
                     return None
                 
-                title = analyze_result.get("page", {}).get("title", "Unknown")
-                vid = analyze_result.get("vid", "")
-                
-                if not vid:
-                    return None
-                
-                # Получаем информацию об авторе
-                artist = analyze_result.get("page", {}).get("a", "Unknown")
-                
-                # Получаем длительность
-                duration_seconds = analyze_result.get("page", {}).get("t", 0)
+                # Получаем информацию о видео
+                title = result.get("meta", {}).get("title", "Unknown")
+                duration_seconds = result.get("meta", {}).get("duration")
                 duration = self._format_duration(duration_seconds)
                 
-                # Шаг 2: Преобразуем видео в mp3
-                await utils.answer(status_message, self.strings["downloading"])
+                # Извлекаем имя артиста
+                artist = "Unknown"
+                if " - " in title:
+                    parts = title.split(" - ", 1)
+                    artist = parts[0].strip()
+                    title = parts[1].strip() if len(parts) > 1 else title
                 
-                convert_url = "https://www.y2mate.com/mates/convertV2/index"
+                # Ищем аудио форматы (отсортированные по качеству)
+                audio_formats = []
+                for item in result.get("url", []):
+                    if item.get("audio") and not item.get("video"):
+                        audio_formats.append(item)
                 
-                # Находим ID формата MP3 320kbps или лучшего доступного
-                mp3_formats = []
-                for item in analyze_result.get("links", {}).get("mp3", []):
-                    if item.get("f") == "mp3":
-                        mp3_formats.append(item)
-                
-                if not mp3_formats:
+                if not audio_formats:
                     return None
                 
                 # Сортируем по качеству и выбираем лучшее
-                mp3_formats.sort(key=lambda x: int(x.get("q", "").replace("kbps", "")), reverse=True)
-                best_format = mp3_formats[0]
-                k = best_format.get("k", "")
-                
-                convert_data = {
-                    "vid": vid,
-                    "k": k
-                }
-                
-                async with self.session.post(convert_url, data=convert_data) as convert_response:
-                    if convert_response.status != 200:
-                        return None
-                    
-                    convert_result = await convert_response.json()
-                    if not convert_result.get("status") == "ok":
-                        return None
-                    
-                    download_url = convert_result.get("dlink", "")
-                    if not download_url:
-                        return None
-                    
-                    # Шаг 3: Скачиваем файл
-                    file_name = f"{title}.mp3"
-                    temp_dir = os.path.join("downloads", "ytmusic")
-                    os.makedirs(temp_dir, exist_ok=True)
-                    file_path = os.path.join(temp_dir, file_name)
-                    
-                    headers = {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
-                        "Referer": "https://www.y2mate.com/",
-                    }
-                    
-                    async with self.session.get(download_url, headers=headers) as file_response:
-                        if file_response.status != 200:
-                            return None
-                        
-                        with open(file_path, 'wb') as f:
-                            f.write(await file_response.read())
-                    
-                    return file_path, title, artist, duration
-        except Exception as e:
-            logger.error(f"Ошибка скачивания через y2mate: {e}")
-            return None
-    
-    async def _download_via_ytmp3(self, video_id, status_message):
-        """Скачивание через сервис ytmp3.cc"""
-        try:
-            # API URL
-            api_url = "https://ytmp3.cc/uu/api/"
-            params = {
-                "id": video_id,
-                "format": "mp3"
-            }
-            
-            await utils.answer(status_message, "<b><emoji document_id=5341715473882955310>⚙️</emoji> <i>Подготовка к скачиванию...</i></b>")
-            
-            # Подготовка скачивания
-            async with self.session.get(api_url, params=params) as response:
-                if response.status != 200:
-                    return None
-                
-                data = await response.json()
-                if data.get("status") != "success":
-                    return None
-                
-                title = data.get("title", "Unknown")
-                download_url = data.get("download_url")
-                duration = data.get("duration", "Unknown")
+                audio_formats.sort(key=lambda x: int(x.get("quality", "").replace("kbps", "").strip()) if x.get("quality") else 0, reverse=True)
+                best_format = audio_formats[0]
+                download_url = best_format.get("url")
                 
                 if not download_url:
                     return None
@@ -309,21 +263,19 @@ class YTMusicDLMod(loader.Module):
                 # Скачиваем файл
                 await utils.answer(status_message, self.strings["downloading"])
                 
-                file_name = f"{title}.mp3"
+                file_name = f"{title} - {artist}.mp3"
+                # Заменяем недопустимые символы в имени файла
+                file_name = re.sub(r'[\\/*?:"<>|]', "", file_name)
                 temp_dir = os.path.join("downloads", "ytmusic")
                 os.makedirs(temp_dir, exist_ok=True)
                 file_path = os.path.join(temp_dir, file_name)
                 
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+                download_headers = {
+                    "User-Agent": self._get_random_user_agent(),
+                    "Referer": "https://ssyoutube.com/",
                 }
                 
-                # Извлекаем имя артиста из названия (если возможно)
-                artist = "Unknown"
-                if " - " in title:
-                    artist, title = title.split(" - ", 1)
-                
-                async with self.session.get(download_url, headers=headers) as file_response:
+                async with self.session.get(download_url, headers=download_headers) as file_response:
                     if file_response.status != 200:
                         return None
                     
@@ -332,7 +284,295 @@ class YTMusicDLMod(loader.Module):
                 
                 return file_path, title, artist, duration
         except Exception as e:
-            logger.error(f"Ошибка скачивания через ytmp3: {e}")
+            logger.error(f"Ошибка скачивания через savefrom: {e}")
+            return None
+    
+    async def _download_via_y2down(self, video_id, video_url, status_message):
+        """Скачивание через сервис y2down.cc"""
+        try:
+            await utils.answer(status_message, self.strings["analyzing"])
+            
+            # Сначала получаем токен
+            init_url = "https://y2down.cc/"
+            headers = {
+                "User-Agent": self._get_random_user_agent(),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            }
+            
+            # Делаем первый запрос для получения cookie и CSRF токена
+            async with self.session.get(init_url, headers=headers) as init_response:
+                if init_response.status != 200:
+                    return None
+                
+                html = await init_response.text()
+                
+                # Ищем CSRF токен в HTML
+                csrf_match = re.search(r'<meta name="csrf-token" content="([^"]+)"', html)
+                if not csrf_match:
+                    return None
+                
+                csrf_token = csrf_match.group(1)
+                
+                # Сохраняем cookies из первого запроса
+                cookies = init_response.cookies
+            
+            # Делаем запрос на анализ видео
+            api_url = "https://y2down.cc/analyze"
+            api_headers = {
+                "User-Agent": self._get_random_user_agent(),
+                "Accept": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "X-CSRF-TOKEN": csrf_token,
+                "X-Requested-With": "XMLHttpRequest",
+                "Origin": "https://y2down.cc",
+                "Referer": "https://y2down.cc/",
+            }
+            
+            data = {
+                "url": video_url
+            }
+            
+            async with self.session.post(api_url, headers=api_headers, data=data, cookies=cookies) as response:
+                if response.status != 200:
+                    return None
+                
+                try:
+                    result = await response.json()
+                except:
+                    return None
+                
+                if not result or "status" not in result or result["status"] != "success":
+                    return None
+                
+                data = result.get("data", {})
+                
+                # Получаем информацию о видео
+                title = data.get("title", "Unknown")
+                video_data = data.get("video", {})
+                duration_text = video_data.get("duration", "0:00")
+                
+                # Извлекаем имя артиста
+                artist = "Unknown"
+                if " - " in title:
+                    parts = title.split(" - ", 1)
+                    artist = parts[0].strip()
+                    title = parts[1].strip() if len(parts) > 1 else title
+                
+                # Ищем аудио форматы
+                audio_formats = data.get("audio", [])
+                if not audio_formats:
+                    return None
+                
+                # Находим формат mp3 с наилучшим качеством
+                best_format = None
+                for format in audio_formats:
+                    if format.get("ext") == "mp3":
+                        if not best_format or int(format.get("quality", "0").replace("kbps", "")) > int(best_format.get("quality", "0").replace("kbps", "")):
+                            best_format = format
+                
+                if not best_format:
+                    # Если mp3 не найден, берем любой первый аудио формат
+                    best_format = audio_formats[0]
+                
+                download_url = best_format.get("url")
+                
+                if not download_url:
+                    return None
+                
+                # Скачиваем файл
+                await utils.answer(status_message, self.strings["downloading"])
+                
+                file_name = f"{title} - {artist}.mp3"
+                # Заменяем недопустимые символы в имени файла
+                file_name = re.sub(r'[\\/*?:"<>|]', "", file_name)
+                temp_dir = os.path.join("downloads", "ytmusic")
+                os.makedirs(temp_dir, exist_ok=True)
+                file_path = os.path.join(temp_dir, file_name)
+                
+                download_headers = {
+                    "User-Agent": self._get_random_user_agent(),
+                    "Referer": "https://y2down.cc/",
+                }
+                
+                async with self.session.get(download_url, headers=download_headers) as file_response:
+                    if file_response.status != 200:
+                        return None
+                    
+                    with open(file_path, 'wb') as f:
+                        f.write(await file_response.read())
+                
+                return file_path, title, artist, duration_text
+        except Exception as e:
+            logger.error(f"Ошибка скачивания через y2down: {e}")
+            return None
+    
+    async def _download_via_notube(self, video_id, video_url, status_message):
+        """Скачивание через сервис notube.net"""
+        try:
+            await utils.answer(status_message, self.strings["analyzing"])
+            
+            # Первый запрос для получения токена и куки
+            init_url = "https://notube.net/ru/youtube-app-v36"
+            headers = {
+                "User-Agent": self._get_random_user_agent(),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            }
+            
+            async with self.session.get(init_url, headers=headers) as init_response:
+                if init_response.status != 200:
+                    return None
+                
+                html = await init_response.text()
+                
+                # Ищем токен в HTML
+                token_match = re.search(r'var\s+token\s*=\s*["\']([^"\']+)["\']', html)
+                if not token_match:
+                    return None
+                
+                token = token_match.group(1)
+                
+                # Сохраняем cookies
+                cookies = init_response.cookies
+            
+            # Запрос на анализ видео
+            api_url = "https://notube.net/api/v1/analyze"
+            api_headers = {
+                "User-Agent": self._get_random_user_agent(),
+                "Accept": "application/json, text/plain, */*",
+                "Content-Type": "application/json",
+                "Origin": "https://notube.net",
+                "Referer": "https://notube.net/ru/youtube-app-v36",
+                "X-Requested-With": "XMLHttpRequest",
+            }
+            
+            api_data = {
+                "url": video_url,
+                "token": token,
+                "lang": "ru"
+            }
+            
+            # Генерируем уникальный идентификатор для отслеживания задачи
+            task_id = f"{int(time.time())}{random.randint(1000, 9999)}"
+            
+            async with self.session.post(api_url, headers=api_headers, json=api_data, cookies=cookies) as response:
+                if response.status != 200:
+                    return None
+                
+                try:
+                    result = await response.json()
+                except:
+                    return None
+                
+                if not result or "data" not in result:
+                    return None
+                
+                data = result.get("data", {})
+                
+                # Получаем информацию о видео
+                title = data.get("title", "Unknown")
+                duration_seconds = data.get("duration", 0)
+                duration = self._format_duration(duration_seconds)
+                
+                # Извлекаем имя артиста
+                artist = "Unknown"
+                if " - " in title:
+                    parts = title.split(" - ", 1)
+                    artist = parts[0].strip()
+                    title = parts[1].strip() if len(parts) > 1 else title
+                
+                # Ищем аудио форматы
+                formats = data.get("formats", [])
+                audio_formats = [f for f in formats if f.get("type") == "audio" and "mp3" in f.get("format", "").lower()]
+                
+                if not audio_formats:
+                    return None
+                
+                # Сортируем по качеству
+                audio_formats.sort(key=lambda x: int(re.search(r'(\d+)\s*kbps', x.get("format", "0 kbps")).group(1)) if re.search(r'(\d+)\s*kbps', x.get("format", "0 kbps")) else 0, reverse=True)
+                
+                best_format = audio_formats[0]
+                format_id = best_format.get("id")
+                
+                if not format_id:
+                    return None
+                
+                # Запрос на конвертацию
+                convert_url = "https://notube.net/api/v1/convert"
+                convert_data = {
+                    "id": data.get("id"),
+                    "format": format_id,
+                    "taskId": task_id,
+                    "title": title,
+                    "token": token
+                }
+                
+                async with self.session.post(convert_url, headers=api_headers, json=convert_data, cookies=cookies) as convert_response:
+                    if convert_response.status != 200:
+                        return None
+                    
+                    try:
+                        convert_result = await convert_response.json()
+                    except:
+                        return None
+                    
+                    if not convert_result or "data" not in convert_result:
+                        return None
+                    
+                    convert_data = convert_result.get("data", {})
+                    download_url = convert_data.get("url")
+                    
+                    if not download_url:
+                        # Если URL нет сразу, пробуем проверить статус конвертации
+                        await utils.answer(status_message, "<b><emoji document_id=5341715473882955310>⚙️</emoji> <i>Ожидание конвертации...</i></b>")
+                        
+                        status_url = f"https://notube.net/api/v1/task/{task_id}/status"
+                        
+                        # Пробуем до 10 раз с интервалом в 3 секунды
+                        for _ in range(10):
+                            await asyncio.sleep(3)
+                            
+                            async with self.session.get(status_url, headers=api_headers, cookies=cookies) as status_response:
+                                if status_response.status != 200:
+                                    continue
+                                
+                                try:
+                                    status_result = await status_response.json()
+                                    if status_result.get("data", {}).get("status") == "processed":
+                                        # Получаем готовую ссылку
+                                        download_url = status_result.get("data", {}).get("url")
+                                        if download_url:
+                                            break
+                                except:
+                                    continue
+                    
+                    if not download_url:
+                        return None
+                    
+                    # Скачиваем файл
+                    await utils.answer(status_message, self.strings["downloading"])
+                    
+                    file_name = f"{title} - {artist}.mp3"
+                    # Заменяем недопустимые символы в имени файла
+                    file_name = re.sub(r'[\\/*?:"<>|]', "", file_name)
+                    temp_dir = os.path.join("downloads", "ytmusic")
+                    os.makedirs(temp_dir, exist_ok=True)
+                    file_path = os.path.join(temp_dir, file_name)
+                    
+                    download_headers = {
+                        "User-Agent": self._get_random_user_agent(),
+                        "Referer": "https://notube.net/",
+                    }
+                    
+                    async with self.session.get(download_url, headers=download_headers) as file_response:
+                        if file_response.status != 200:
+                            return None
+                        
+                        with open(file_path, 'wb') as f:
+                            f.write(await file_response.read())
+                    
+                    return file_path, title, artist, duration
+        except Exception as e:
+            logger.error(f"Ошибка скачивания через notube: {e}")
             return None
     
     def _format_duration(self, seconds):
