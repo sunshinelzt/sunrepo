@@ -5,11 +5,11 @@
 
 import os
 import re
-import sys
+import json
 import asyncio
 import logging
 import tempfile
-import platform
+import base64
 from typing import Union, Optional
 
 from telethon import events
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 @loader.tds
 class YTMusicDLMod(loader.Module):
-    """Модуль для скачивания музыки с YouTube и YouTube Music с поддержкой cookies"""
+    """Модуль для скачивания музыки с YouTube и YouTube Music с поддержкой Google авторизации"""
     
     strings = {
         "name": "YTMusicDL",
@@ -35,31 +35,79 @@ class YTMusicDLMod(loader.Module):
         "no_results": "<b><emoji document_id=5210952531676504517>❌</emoji> <i>По запросу</i> <code>{}</code> <i>ничего не найдено</i></b>",
         "processing": "<b><emoji document_id=5341715473882955310>⚙️</emoji> <i>Обработка...</i></b>",
         "starting": "<b><emoji document_id=5188481279963715781>🚀</emoji> <i>Начинаю загрузку...</i></b>",
-        "config_cookies": "Используемый браузер для cookies (chrome, firefox, opera, edge, safari, brave)",
         "config_quality": "Качество скачиваемой музыки (от 128 до 320)",
         "config_max_duration": "Максимальная продолжительность аудио (в минутах, 0 - без ограничений)",
+        "token_saved": "<b><emoji document_id=5776375003280838798>✅</emoji> <i>Токен авторизации успешно сохранен!</i></b>",
+        "token_removed": "<b><emoji document_id=5776375003280838798>✅</emoji> <i>Токен авторизации удален!</i></b>",
+        "token_not_set": "<b><emoji document_id=5210952531676504517>❌</emoji> <i>Токен не установлен! Используйте</i> <code>.ytauth [токен]</code> <i>для установки</i></b>",
+        "auth_help": "<b>Для получения токена авторизации Google:</b>\n\n1. Откройте YouTube в браузере\n2. Войдите в свой аккаунт Google\n3. Нажмите F12 для открытия инструментов разработчика\n4. Перейдите на вкладку 'Консоль'\n5. Вставьте и выполните следующий JavaScript код:\n\n<code>copy(document.cookie.split('; ').filter(c => c.includes('SAPISID=')).join('; '));</code>\n\n6. Токен скопирован в буфер обмена\n7. Используйте команду <code>.ytauth [вставить скопированный токен]</code>",
     }
     
     def __init__(self):
         self.config = loader.ModuleConfig(
-            "browser", "chrome", lambda: self.strings["config_cookies"],
             "quality", "320", lambda: self.strings["config_quality"],
             "max_duration", 0, lambda: self.strings["config_max_duration"],
         )
+        # Храним данные авторизации в отдельном файле для безопасности
+        self.auth_file = os.path.join("downloads", "ytmusic_auth.json")
+        self.auth_data = self._load_auth_data()
     
     async def client_ready(self, client, db):
         """Вызывается при готовности клиента"""
         self.client = client
         self.db = db
-    
-    def get_browser_cookies_path(self) -> Optional[str]:
-        """Получает путь к cookies для указанного браузера"""
-        browser = self.config["browser"].lower()
         
-        if browser not in ["chrome", "firefox", "opera", "edge", "safari", "brave"]:
-            return None
-            
-        return browser
+        # Создаем директорию если не существует
+        os.makedirs(os.path.dirname(self.auth_file), exist_ok=True)
+    
+    def _load_auth_data(self):
+        """Загружает данные авторизации из файла"""
+        try:
+            if os.path.exists(self.auth_file):
+                with open(self.auth_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.error(f"Ошибка загрузки данных авторизации: {e}")
+        return {"authorization_token": None}
+    
+    def _save_auth_data(self):
+        """Сохраняет данные авторизации в файл"""
+        try:
+            with open(self.auth_file, 'w') as f:
+                json.dump(self.auth_data, f)
+        except Exception as e:
+            logger.error(f"Ошибка сохранения данных авторизации: {e}")
+    
+    @loader.owner
+    @loader.command(ru_doc="[токен] - Установить токен авторизации Google для YouTube")
+    async def ytauth(self, message):
+        """[токен] - Установить токен авторизации Google для YouTube"""
+        args = utils.get_args_raw(message)
+        
+        if not args:
+            await utils.answer(message, self.strings["auth_help"])
+            return
+        
+        # Для безопасности удаляем сообщение с токеном
+        await message.delete()
+        
+        # Сохраняем токен
+        self.auth_data["authorization_token"] = args
+        self._save_auth_data()
+        
+        # Отправляем новое сообщение об успешном сохранении
+        await self.client.send_message(
+            message.chat_id,
+            self.strings["token_saved"]
+        )
+    
+    @loader.owner
+    @loader.command(ru_doc="Удалить сохраненный токен авторизации")
+    async def ytdelauth(self, message):
+        """Удалить сохраненный токен авторизации"""
+        self.auth_data["authorization_token"] = None
+        self._save_auth_data()
+        await utils.answer(message, self.strings["token_removed"])
     
     @loader.owner
     @loader.command(ru_doc="[ссылка или название] - Скачать музыку с YouTube")
@@ -158,8 +206,7 @@ class YTMusicDLMod(loader.Module):
                 return
     
     def get_ydl_opts(self, output_file=None, download=True):
-        """Получает настройки для yt-dlp с учетом cookies"""
-        cookies_browser = self.get_browser_cookies_path()
+        """Получает настройки для yt-dlp с учетом авторизации"""
         quality = self.config["quality"]
         
         # Проверка качества
@@ -180,16 +227,36 @@ class YTMusicDLMod(loader.Module):
             "nocheckcertificate": True,
             "ignoreerrors": False,
             "logtostderr": False,
-            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+            "referer": "https://www.youtube.com/",
+            "http_headers": {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-us,en;q=0.5",
+                "Sec-Fetch-Mode": "navigate",
+            },
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android"],
+                    "player_skip": ["webpage", "configs", "js"],
+                }
+            },
+            "extractor_retries": 3,
+            "retries": 10,
+            "fragment_retries": 10,
+            "skip_download_archive": True,
             "geo_bypass": True,
             "geo_bypass_country": "US",
             "no_color": True,
-            "socket_timeout": 15,
+            "socket_timeout": 30,
         }
         
-        # Добавляем cookies из браузера, если указан
-        if cookies_browser:
-            ydl_opts["cookiesfrombrowser"] = (cookies_browser,)
+        # Добавляем данные авторизации, если они есть
+        if self.auth_data.get("authorization_token"):
+            # Создаем временный файл cookies с токеном
+            cookie_jar = self._create_cookie_jar_from_token(self.auth_data["authorization_token"])
+            if cookie_jar:
+                ydl_opts["cookiefile"] = cookie_jar
         
         # Если это запрос на скачивание
         if download and output_file:
@@ -206,6 +273,34 @@ class YTMusicDLMod(loader.Module):
             ydl_opts["extract_flat"] = True
         
         return ydl_opts
+    
+    def _create_cookie_jar_from_token(self, token):
+        """Создает временный файл cookies на основе токена Google"""
+        try:
+            # Парсим токен (предполагаем, что это строка cookies с SAPISID и другими)
+            cookie_parts = token.split('; ')
+            
+            # Создаем временный файл
+            cookie_file = os.path.join("downloads", "temp_youtube_cookies.txt")
+            
+            with open(cookie_file, 'w') as f:
+                f.write("# Netscape HTTP Cookie File\n")
+                
+                # Записываем каждую cookie в формате Netscape
+                for cookie in cookie_parts:
+                    if '=' in cookie:
+                        name, value = cookie.split('=', 1)
+                        domain = ".youtube.com"
+                        if "SAPISID" in name or "SID" in name or "HSID" in name or "SSID" in name:
+                            domain = ".google.com"
+                            
+                        # Формат: domain, flag, path, secure, expiration, name, value
+                        f.write(f"{domain}\tTRUE\t/\tTRUE\t1735689600\t{name}\t{value}\n")
+            
+            return cookie_file
+        except Exception as e:
+            logger.error(f"Ошибка создания файла cookies: {e}")
+            return None
     
     def format_duration(self, seconds: int) -> str:
         """Форматирует длительность в удобочитаемый формат"""
