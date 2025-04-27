@@ -139,9 +139,9 @@ class KeeperMod(loader.Module):
             caption = f"<emoji document_id=6046410905829251121>💥</emoji> <b>Спиздил медиа</b>\n"
             
             if sender:
-                first_name = getattr(sender, 'first_name', 'idk')
+                first_name = getattr(sender, 'first_name', 'не указан')
                 last_name = getattr(sender, 'last_name', '')
-                username = getattr(sender, 'username', 'idk')
+                username = getattr(sender, 'username', 'не указан')
                 
                 caption += f"<b>От:</b> {first_name}"
                 if last_name:
