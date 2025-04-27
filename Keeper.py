@@ -39,10 +39,8 @@ class KeeperMod(loader.Module):
         """Включить/выключить автосохранение"""
         state = self.db.get("Keeper", "state", False)
         
-        # Переключаем состояние автосохранения
         self.db.set("Keeper", "state", not state)
 
-        # Отправляем информацию в чат о текущем состоянии
         if state:
             await m.reply("Автосохранение <b>выключено</b>.")
         else:
