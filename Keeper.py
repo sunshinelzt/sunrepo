@@ -38,7 +38,16 @@ class KeeperMod(loader.Module):
     async def akpcmd(self, m):
         """Включить/выключить автосохранение"""
         state = self.db.get("Keeper", "state", False)
+        
+        # Печать текущего состояния автосохранения
+        if state:
+            print("Автосохранение включено.")
+        else:
+            print("Автосохранение выключено.")
+        
+        # Переключение состояния автосохранения
         self.db.set("Keeper", "state", not state)
+        
         await m.delete()
 
     async def watcher(self, m):
