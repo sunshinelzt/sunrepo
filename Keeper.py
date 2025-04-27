@@ -52,7 +52,23 @@ class KeeperMod(loader.Module):
         """Проверка на самоуничтожающееся говно"""
         if not media:
             return False
-        return getattr(media, 'ttl_seconds', None) is not None or getattr(media, 'has_view_once', False)
+            
+        if getattr(media, 'ttl_seconds', None) is not None:
+            return True
+            
+        if getattr(media, 'has_view_once', False):
+            return True
+            
+        if hasattr(media, 'round_message') and media.round_message:
+            return True
+            
+        if hasattr(media, 'document'):
+            for attr in getattr(media.document, 'attributes', []):
+                if isinstance(attr, types.DocumentAttributeAudio) and attr.voice:
+                    if getattr(media, 'has_view_once', False):
+                        return True
+                        
+        return False
 
     def get_extension(self, message):
         """Определяет тип этой параши по расширению"""
@@ -72,6 +88,14 @@ class KeeperMod(loader.Module):
             'audio/mpeg': '.mp3',
             'audio/ogg': '.ogg'
         }
+        
+        if hasattr(message.media, 'round_message') and message.media.round_message:
+            return '.mp4'
+            
+        if hasattr(message.media, 'document'):
+            for attr in getattr(message.media.document, 'attributes', []):
+                if isinstance(attr, types.DocumentAttributeAudio) and attr.voice:
+                    return '.ogg'
         
         if mime_type in extensions:
             return extensions[mime_type]
@@ -100,10 +124,27 @@ class KeeperMod(loader.Module):
             
             sender = message.sender
             caption = f"<emoji document_id=6046410905829251121>💥</emoji> <b>Спиздил медиа</b>\n"
+            
             if sender:
-                caption += f"<b>От:</b> {getattr(sender, 'first_name', 'хз кто')} {getattr(sender, 'last_name', '')}\n"
-                caption += f"<b>Юзернейм:</b> @{getattr(sender, 'username', 'неизвестен')}\n"
+                first_name = getattr(sender, 'first_name', 'хз кто')
+                last_name = getattr(sender, 'last_name', '')
+                username = getattr(sender, 'username', 'хз какой')
+                
+                caption += f"<b>От:</b> {first_name}"
+                if last_name:
+                    caption += f" {last_name}"
+                caption += "\n"
+                
+                caption += f"<b>Юзернейм:</b> @{username}\n"
                 caption += f"<b>ID:</b> <code>{sender.id}</code>"
+                
+                if hasattr(message.media, 'round_message') and message.media.round_message:
+                    caption += "\n<b>Тип:</b> Кружок"
+                elif hasattr(message.media, 'document'):
+                    for attr in getattr(message.media.document, 'attributes', []):
+                        if isinstance(attr, types.DocumentAttributeAudio) and attr.voice:
+                            caption += "\n<b>Тип:</b> Голосовое сообщение"
+                            break
             
             await self.client.send_file("me", file, caption=caption)
             return True
