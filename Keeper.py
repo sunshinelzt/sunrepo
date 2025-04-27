@@ -99,7 +99,7 @@ class KeeperMod(loader.Module):
             file.name = getattr(message.file, "name", f"stolen_{timestamp}{ext}")
             
             sender = message.sender
-            caption = f"<emoji document_id=6046410905829251121>💥</emoji> <b>Спиздили медиа</b>\n"
+            caption = f"<emoji document_id=6046410905829251121>💥</emoji> <b>Спиздил медиа</b>\n"
             if sender:
                 caption += f"<b>От:</b> {getattr(sender, 'first_name', 'хз кто')} {getattr(sender, 'last_name', '')}\n"
                 caption += f"<b>Юзернейм:</b> @{getattr(sender, 'username', 'неизвестен')}\n"
