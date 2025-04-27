@@ -39,15 +39,15 @@ class KeeperMod(loader.Module):
         """Включить/выключить автосохранение"""
         state = self.db.get("Keeper", "state", False)
         
-        # Печать текущего состояния автосохранения
-        if state:
-            print("Автосохранение включено.")
-        else:
-            print("Автосохранение выключено.")
-        
-        # Переключение состояния автосохранения
+        # Переключаем состояние автосохранения
         self.db.set("Keeper", "state", not state)
-        
+
+        # Отправляем информацию в чат о текущем состоянии
+        if state:
+            await m.reply("Автосохранение <b>выключено</b>.")
+        else:
+            await m.reply("Автосохранение <b>включено</b>.")
+
         await m.delete()
 
     async def watcher(self, m):
