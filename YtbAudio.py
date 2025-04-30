@@ -52,8 +52,8 @@ class YtbAudioModule(loader.Module):
             async with session.get(video_url) as response:
                 html = await response.text()
                 
-        title_match = re.search(r'<meta name="title" content="([^"]+)"', html)
-        author_match = re.search(r'<link itemprop="name" content="([^"]+)"', html)
+        title_match = re.search(r'<title[^>]*>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
+        author_match = re.search(r'<meta\s+name=["\']author["\']\s+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
         
         title = title_match.group(1) if title_match else "Неизвестное название"
         author = author_match.group(1) if author_match else "Неизвестный автор"
