@@ -221,93 +221,75 @@ class YtbAudioModule(loader.Module):
             
             await utils.answer(status_msg, self.strings["downloading"])
             
-            # Список для хранения ID сообщений, которые нужно удалить
-            sent_messages = []
-            
+            # Получаем аудио с помощью бота
             async with message.client.conversation(self.bot_username) as conv:
                 # Отправляем запрос боту
-                bot_request = await conv.send_message(normalized_url)
-                sent_messages.append(bot_request)
+                await conv.send_message(normalized_url)
                 
-                # Ждем и получаем ответ от бота
+                audio_file = None
+                audio_response = None
+                
+                # Ждем и получаем ответы от бота
                 try:
-                    response = await conv.get_response(timeout=90)  # Увеличиваем timeout для больших файлов
-                    sent_messages.append(response)
+                    # Получаем первый ответ
+                    response = await conv.get_response(timeout=90)
                     
                     # Проверяем есть ли медиа в сообщении
                     if response.media:
-                        await utils.answer(status_msg, self.strings["sending"])
-                        
-                        caption = f"<emoji document_id=5891249688933305846>🎵</emoji> <b>{title}</b>\n<emoji document_id=5879770735999717115>👤</emoji> <b>{author}</b>\n\n<emoji document_id=5877465816030515018>🔗</emoji> <a href='{youtube_url}'>YouTube</a>"
-                        
-                        # Отправляем аудио пользователю
-                        await message.client.send_file(
-                            message.chat_id,
-                            response.media,
-                            caption=caption,
-                            parse_mode='html'
-                        )
-                        
-                        # Удаляем все сообщения в переписке с ботом
-                        for msg in sent_messages:
+                        audio_file = response.media
+                        audio_response = response
+                    else:
+                        # Если в первом ответе нет медиа, ждем дополнительные сообщения
+                        for _ in range(5):
                             try:
-                                await msg.delete()
-                            except Exception:
-                                pass
-                        
-                        # Удаляем статусное сообщение
-                        await status_msg.delete()
-                        return
-                except asyncio.TimeoutError:
-                    # Если ответ не пришел вовремя, удаляем переписку и выходим с ошибкой
-                    for msg in sent_messages:
-                        try:
-                            await msg.delete()
-                        except Exception:
-                            pass
-                    return await utils.answer(status_msg, self.strings["error"])
+                                response = await conv.get_response(timeout=30)
+                                if response.media:
+                                    audio_file = response.media
+                                    audio_response = response
+                                    break
+                            except asyncio.TimeoutError:
+                                break
                 
-                # Если в первом ответе нет медиа, ждем дополнительные сообщения
-                for _ in range(5):
-                    try:
-                        response = await conv.get_response(timeout=30)
-                        sent_messages.append(response)
-                        
-                        if response.media:
-                            await utils.answer(status_msg, self.strings["sending"])
-                            
-                            caption = f"<emoji document_id=5891249688933305846>🎵</emoji> <b>{title}</b>\n<emoji document_id=5879770735999717115>👤</emoji> <b>{author}</b>\n\n<emoji document_id=5877465816030515018>🔗</emoji> <a href='{youtube_url}'>YouTube</a>"
-                            
-                            # Отправляем аудио пользователю
-                            await message.client.send_file(
-                                message.chat_id,
-                                response.media,
-                                caption=caption,
-                                parse_mode='html'
-                            )
-                            
-                            # Удаляем все сообщения в переписке с ботом
-                            for msg in sent_messages:
-                                try:
-                                    await msg.delete()
-                                except Exception:
-                                    pass
-                            
-                            # Удаляем статусное сообщение
-                            await status_msg.delete()
-                            return
-                    except asyncio.TimeoutError:
-                        break
-            
-            # Удаляем все сообщения в переписке с ботом, даже если не удалось получить аудио
-            for msg in sent_messages:
-                try:
-                    await msg.delete()
-                except Exception:
+                except asyncio.TimeoutError:
                     pass
+                
+                # Получаем все сообщения в диалоге с ботом
+                async for message_to_delete in message.client.iter_messages(self.bot_username):
+                    try:
+                        await message_to_delete.delete()
+                    except Exception as e:
+                        self.logger.error(f"Error deleting message: {str(e)}")
+                
+                # Проверяем, получили ли мы аудио
+                if audio_file:
+                    await utils.answer(status_msg, self.strings["sending"])
                     
-            await utils.answer(status_msg, self.strings["error"])
+                    caption = f"<emoji document_id=5891249688933305846>🎵</emoji> <b>{title}</b>\n<emoji document_id=5879770735999717115>👤</emoji> <b>{author}</b>\n\n<emoji document_id=5877465816030515018>🔗</emoji> <a href='{youtube_url}'>YouTube</a>"
+                    
+                    # Отправляем аудио пользователю
+                    await message.client.send_file(
+                        message.chat_id,
+                        audio_file,
+                        caption=caption,
+                        parse_mode='html'
+                    )
+                    
+                    # Удаляем статусное сообщение
+                    await status_msg.delete()
+                    return
+                else:
+                    await utils.answer(status_msg, self.strings["error"])
             
         except Exception as e:
+            # В случае ошибки, пытаемся удалить всю переписку с ботом
+            try:
+                async for message_to_delete in message.client.iter_messages(self.bot_username):
+                    try:
+                        await message_to_delete.delete()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+                
             self.logger.error(f"Error in ytbcmd: {str(e)}")
             await utils.answer(status_msg, f"{self.strings['error']}\n\n{str(e)}")
