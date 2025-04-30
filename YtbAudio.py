@@ -221,14 +221,15 @@ class YtbAudioModule(loader.Module):
             
             await utils.answer(status_msg, self.strings["downloading"])
             
-            sent_messages = []  # Список для хранения ID сообщений, которые нужно удалить
+            # Список для хранения ID сообщений, которые нужно удалить
+            sent_messages = []
             
             async with message.client.conversation(self.bot_username) as conv:
-                # Отправляем запрос боту и сохраняем ID сообщения
+                # Отправляем запрос боту
                 bot_request = await conv.send_message(normalized_url)
                 sent_messages.append(bot_request)
                 
-                # Ждем и получаем первый ответ от бота
+                # Ждем и получаем ответ от бота
                 try:
                     response = await conv.get_response(timeout=90)  # Увеличиваем timeout для больших файлов
                     sent_messages.append(response)
@@ -258,7 +259,7 @@ class YtbAudioModule(loader.Module):
                         await status_msg.delete()
                         return
                 except asyncio.TimeoutError:
-                    # Если первый ответ не пришел вовремя, выходим с ошибкой
+                    # Если ответ не пришел вовремя, удаляем переписку и выходим с ошибкой
                     for msg in sent_messages:
                         try:
                             await msg.delete()
@@ -298,7 +299,7 @@ class YtbAudioModule(loader.Module):
                     except asyncio.TimeoutError:
                         break
             
-            # Если не удалось получить аудио, пытаемся удалить все отправленные сообщения
+            # Удаляем все сообщения в переписке с ботом, даже если не удалось получить аудио
             for msg in sent_messages:
                 try:
                     await msg.delete()
