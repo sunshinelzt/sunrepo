@@ -1,3 +1,5 @@
+# meta developer: @sunshinelzt
+
 import asyncio
 import logging
 import contextlib
