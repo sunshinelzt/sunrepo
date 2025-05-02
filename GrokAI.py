@@ -1,5 +1,3 @@
-# meta developer: @sunshinelzt
-
 import asyncio
 import logging
 import contextlib
@@ -11,8 +9,6 @@ import base64
 import mimetypes
 from typing import Union, List, Optional, Dict, Any
 
-from openai import OpenAI
-from .. import loader, utils
 from telethon import types
 from telethon.tl.types import DocumentAttributeFilename, Message
 
@@ -45,10 +41,8 @@ class GrokAI(loader.Module):
         "file_ready": "<emoji document_id=5314250708508220914>✅</emoji> <b>Файл загружен и готов к анализу!</b>",
         "available_models": """<emoji document_id=5314250708508220914>✅</emoji> <b>Доступные модели Grok AI:</b>
 
-• <code>grok-beta</code> - Основная модель Grok (beta)
-• <code>grok-1</code> - Стабильная версия Grok
-• <code>grok-pro</code> - Профессиональная расширенная версия Grok
-• <code>grok-mini</code> - Легкая и быстрая версия Grok
+• <code>grok-1</code> - Основная модель Grok
+• <code>grok-2</code> - Улучшенная версия Grok
 • <code>grok-vision</code> - Модель с поддержкой анализа изображений
 
 Текущая модель: <code>{current_model}</code>"""
@@ -77,10 +71,8 @@ class GrokAI(loader.Module):
         "file_ready": "<emoji document_id=5314250708508220914>✅</emoji> <b>Файл загружен и готов к анализу!</b>",
         "available_models": """<emoji document_id=5314250708508220914>✅</emoji> <b>Доступные модели Grok AI:</b>
 
-• <code>grok-beta</code> - Основная модель Grok (beta)
-• <code>grok-1</code> - Стабильная версия Grok
-• <code>grok-pro</code> - Профессиональная расширенная версия Grok
-• <code>grok-mini</code> - Легкая и быстрая версия Grok
+• <code>grok-1</code> - Основная модель Grok
+• <code>grok-2</code> - Улучшенная версия Grok
 • <code>grok-vision</code> - Модель с поддержкой анализа изображений
 
 Текущая модель: <code>{current_model}</code>"""
@@ -91,14 +83,14 @@ class GrokAI(loader.Module):
             loader.ConfigValue(
                 "api_key",
                 None,
-                lambda: "Токен GrokAI. Получить токен: https://console.x.ai",
+                lambda: "Токен Grok AI. Получить токен на сайте X.ai",
                 validator=loader.validators.Hidden(loader.validators.String())
             ),
             loader.ConfigValue(
                 "model",
-                "grok-beta",
-                lambda: "Модель Grok AI. Доступны: grok-beta, grok-1, grok-pro, grok-mini, grok-vision",
-                validator=loader.validators.Choice(["grok-beta", "grok-1", "grok-pro", "grok-mini", "grok-vision"])
+                "grok-1",
+                lambda: "Модель Grok AI. Доступны: grok-1, grok-2, grok-vision",
+                validator=loader.validators.Choice(["grok-1", "grok-2", "grok-vision"])
             ),
             loader.ConfigValue(
                 "max_tokens",
@@ -136,17 +128,42 @@ class GrokAI(loader.Module):
         self.db = db
         self._client = client
         self._grok_client = None
-        # Создаем OpenAI клиент при первой необходимости
+        try:
+            # Проверяем наличие необходимых модулей
+            import requests
+        except ImportError:
+            logger.error("Не установлен модуль requests. Установите его через pip install requests")
 
-    @property
-    def grok_client(self):
-        """Lazy-загрузка клиента Grok AI"""
-        if self._grok_client is None:
-            self._grok_client = OpenAI(
-                api_key=self.config['api_key'],
-                base_url="https://api.x.ai/v1"  # Точка входа для Grok API
-            )
-        return self._grok_client
+    def _create_grok_client(self):
+        """Создает клиент для работы с Grok API"""
+        if not self.config['api_key']:
+            raise ValueError("API ключ не установлен")
+        
+        # Вместо использования OpenAI клиента, будем использовать напрямую requests
+        # для обращения к API Grok
+        return {
+            "api_key": self.config['api_key'],
+            "base_url": "https://api.x.ai/v1"
+        }
+
+    def _make_grok_request(self, endpoint, data):
+        """Отправляет запрос к API Grok"""
+        client = self._create_grok_client()
+        headers = {
+            "Authorization": f"Bearer {client['api_key']}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(
+            f"{client['base_url']}/{endpoint}",
+            headers=headers,
+            json=data
+        )
+        
+        if response.status_code != 200:
+            raise Exception(f"Ошибка API Grok: {response.status_code} - {response.text}")
+            
+        return response.json()
 
     async def _download_media(self, message: Message) -> Optional[Dict[str, Any]]:
         """Загружает медиафайл из сообщения"""
@@ -242,42 +259,26 @@ class GrokAI(loader.Module):
         file_path = media_data.get("file_path")
         
         try:
-            # Формируем правильный контент для запроса
+            # Формируем правильный контент для запроса к Grok
             content_parts = []
             
-            # Добавляем изображение/видео/аудио в соответствующем формате
+            # Адаптируем формат для Grok API
             if media_data["media_type"] in ["photo", "image", "sticker", "gif"]:
                 content_parts.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{media_data['mime_type']};base64,{media_data['base64_data']}"
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_data["mime_type"],
+                        "data": media_data["base64_data"]
                     }
                 })
-            elif media_data["media_type"] in ["video"]:
+            elif media_data["media_type"] in ["video", "audio", "document"]:
                 content_parts.append({
-                    "type": "file_data",
-                    "file_data": {
-                        "mime_type": media_data["mime_type"],
-                        "data": media_data["base64_data"],
-                        "file_type": "video"
-                    }
-                })
-            elif media_data["media_type"] in ["audio"]:
-                content_parts.append({
-                    "type": "file_data",
-                    "file_data": {
-                        "mime_type": media_data["mime_type"],
-                        "data": media_data["base64_data"],
-                        "file_type": "audio"
-                    }
-                })
-            elif media_data["media_type"] == "document":
-                content_parts.append({
-                    "type": "file_data",
-                    "file_data": {
-                        "mime_type": media_data["mime_type"],
-                        "data": media_data["base64_data"],
-                        "file_type": "document"
+                    "type": "file",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_data["mime_type"],
+                        "data": media_data["base64_data"]
                     }
                 })
                 
@@ -328,53 +329,53 @@ class GrokAI(loader.Module):
             
         try:
             media_data = None
-            content_parts = []
+            content = []
             
             # Если есть медиа в ответе на сообщение, обрабатываем его
             if reply_to and reply_to.media:
                 media_data = await self._process_media_content(reply_to)
                 if media_data:
-                    content_parts.extend(media_data["content_parts"])
+                    content.extend(media_data["content_parts"])
             
             # Если есть медиа в текущем сообщении, обрабатываем его
             elif message.media:
                 media_data = await self._process_media_content(message)
                 if media_data:
-                    content_parts.extend(media_data["content_parts"])
+                    content.extend(media_data["content_parts"])
             
             # Добавляем текстовый вопрос, если он есть
             if q:
-                content_parts.append({"type": "text", "text": q})
+                content.append({"type": "text", "text": q})
             elif reply_to and reply_to.text:
-                content_parts.append({"type": "text", "text": reply_to.text})
+                content.append({"type": "text", "text": reply_to.text})
                 q = reply_to.text
                 
             # Если нет никакого контента, возвращаем ошибку
-            if not content_parts:
+            if not content:
                 await self._cleanup_media(media_data["file_path"] if media_data else None)
                 return await utils.answer(
                     status_message, 
                     self.strings["no_args"].format(self.get_prefix(), "grok", "[вопрос]")
                 )
                 
-            # Создаем сообщение для Grok
-            messages = [
-                {
-                    "role": "user",
-                    "content": content_parts if len(content_parts) > 1 else content_parts[0]["text"] if content_parts[0]["type"] == "text" else content_parts
-                }
-            ]
+            # Создаем запрос к Grok API
+            data = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": content
+                    }
+                ],
+                "model": self.config['model'],
+                "max_tokens": self.config["max_tokens"],
+                "temperature": self.config["temperature"],
+            }
             
-            # Отправляем запрос к Grok AI
-            chat_completion = self.grok_client.chat.completions.create(
-                messages=messages,
-                model=self.config['model'],
-                max_tokens=self.config["max_tokens"],
-                temperature=self.config["temperature"],
-            )
+            # Отправляем запрос к Grok API
+            response = self._make_grok_request("chat/completions", data)
             
             # Получаем ответ
-            answer = chat_completion.choices[0].message.content
+            answer = response["choices"][0]["message"]["content"]
             
             # Форматируем красивый ответ
             if self.config["beautify_output"]:
@@ -450,20 +451,19 @@ class GrokAI(loader.Module):
             status_message = status_message[0]
             
         try:
-            # Создаем запрос на генерацию изображения
-            # Примечание: это имитация, так как API Grok не поддерживает генерацию изображений напрямую
-            # В реальном сценарии этот код нужно заменить на корректный API-вызов
-            # Здесь мы используем формат OpenAI для совместимости
-            response = self.grok_client.images.generate(
-                model="grok-vision",  # Используем модель с поддержкой изображений
-                prompt=q,
-                n=1,
-                size="1024x1024"
-            )
+            # Создаем запрос на генерацию изображения у Grok
+            data = {
+                "model": "grok-vision",
+                "prompt": q,
+                "n": 1,
+                "size": "1024x1024"
+            }
             
-            # В реальном API-вызове мы бы получили URL или данные изображения
-            # Здесь мы имитируем получение изображения
-            image_url = response.data[0].url
+            # Отправляем запрос к Grok API
+            response = self._make_grok_request("images/generations", data)
+            
+            # Получаем URL изображения
+            image_url = response["data"][0]["url"]
             
             # Загружаем изображение
             image_data = requests.get(image_url).content
@@ -486,7 +486,7 @@ class GrokAI(loader.Module):
             )
 
     @loader.command(ru_doc="Расшифровать голосовое сообщение с помощью Grok AI")
-    async def groktr(self, message):
+    async def grokv(self, message):
         """Расшифровать голосовое сообщение с помощью Grok AI"""
         reply_to = await message.get_reply_message()
         
@@ -512,30 +512,30 @@ class GrokAI(loader.Module):
                 await self._cleanup_media(media_data["file_path"] if media_data else None)
                 return await utils.answer(status_message, self.strings["no_media"])
                 
-            # Отправляем запрос на расшифровку через Chat API
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "Расшифруй это голосовое сообщение максимально точно"
-                        },
-                        *media_data["content_parts"]
-                    ]
-                }
-            ]
+            # Создаем запрос к Grok API для транскрибации
+            data = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Расшифруй это голосовое сообщение максимально точно"
+                            },
+                            *media_data["content_parts"]
+                        ]
+                    }
+                ],
+                "model": self.config["model"],
+                "max_tokens": self.config["max_tokens"],
+                "temperature": 0.3,  # Используем низкую температуру для более точной расшифровки
+            }
             
             # Отправляем запрос
-            chat_completion = self.grok_client.chat.completions.create(
-                messages=messages,
-                model=self.config['model'],
-                max_tokens=self.config["max_tokens"],
-                temperature=0.3,  # Используем низкую температуру для более точной расшифровки
-            )
+            response = self._make_grok_request("chat/completions", data)
             
             # Получаем ответ
-            transcription = chat_completion.choices[0].message.content
+            transcription = response["choices"][0]["message"]["content"]
             
             # Форматируем и отправляем ответ
             await utils.answer(
@@ -552,4 +552,4 @@ class GrokAI(loader.Module):
         finally:
             # Очищаем временные файлы
             if media_data:
-                await self._cleanup_media(media_data.get("file_path"))
+                await self._cleanup_media(media_data.get("file_path")))
