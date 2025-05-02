@@ -72,7 +72,7 @@ class TTSMod(loader.Module):
             },
             
             # Кастомные голоса для языков (женские)
-            "female_voices": {
+            "female_voices", {
                 "ru": "0G2aDhfNxRTGnEUYb3xd", # Ксения (русский)
                 "en": "EXAVITQu4vr4xnSDxMaL", # Rachel (английский)
                 "uk": "mVEDpXKqJZ4Q9YN36YDw", # Оксана (украинский)
