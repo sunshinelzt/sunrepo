@@ -37,17 +37,9 @@ class GrokAI(loader.Module):
         "no_media": "<emoji document_id=5854929766146118183>❌</emoji> <b>Не удалось обработать медиафайл</b>",
         "media_too_large": "<emoji document_id=5854929766146118183>❌</emoji> <b>Медиафайл слишком большой (>25MB)</b>",
         "generating_image": "<emoji document_id=5325787248363314644>🔄</emoji> <b>Генерирую изображение...</b>",
-        "transcribing_audio": "<emoji document_id=5325787248363314644>🔄</emoji> <b>Расшифровываю аудио...</b>",
         "unknown_type": "<emoji document_id=5854929766146118183>❌</emoji> <b>Неизвестный тип файла</b>",
         "uploading_file": "<emoji document_id=5325787248363314644>🔄</emoji> <b>Загружаю файл на сервер...</b>",
         "file_ready": "<emoji document_id=5314250708508220914>✅</emoji> <b>Файл загружен и готов к анализу!</b>",
-        "available_models": """<emoji document_id=5314250708508220914>✅</emoji> <b>Доступные модели Grok AI:</b>
-
-• <code>grok-1</code> - Основная модель Grok
-• <code>grok-2</code> - Улучшенная версия Grok
-• <code>grok-vision</code> - Модель с поддержкой анализа изображений
-
-Текущая модель: <code>{current_model}</code>"""
     }
 
     strings_ru = {
@@ -67,17 +59,9 @@ class GrokAI(loader.Module):
         "no_media": "<emoji document_id=5854929766146118183>❌</emoji> <b>Не удалось обработать медиафайл</b>",
         "media_too_large": "<emoji document_id=5854929766146118183>❌</emoji> <b>Медиафайл слишком большой (>25MB)</b>",
         "generating_image": "<emoji document_id=5325787248363314644>🔄</emoji> <b>Генерирую изображение...</b>",
-        "transcribing_audio": "<emoji document_id=5325787248363314644>🔄</emoji> <b>Расшифровываю аудио...</b>",
         "unknown_type": "<emoji document_id=5854929766146118183>❌</emoji> <b>Неизвестный тип файла</b>",
         "uploading_file": "<emoji document_id=5325787248363314644>🔄</emoji> <b>Загружаю файл на сервер...</b>",
         "file_ready": "<emoji document_id=5314250708508220914>✅</emoji> <b>Файл загружен и готов к анализу!</b>",
-        "available_models": """<emoji document_id=5314250708508220914>✅</emoji> <b>Доступные модели Grok AI:</b>
-
-• <code>grok-1</code> - Основная модель Grok
-• <code>grok-2</code> - Улучшенная версия Grok
-• <code>grok-vision</code> - Модель с поддержкой анализа изображений
-
-Текущая модель: <code>{current_model}</code>"""
     }
 
     def __init__(self):
@@ -298,14 +282,6 @@ class GrokAI(loader.Module):
             await self._cleanup_media(file_path)
             return None
 
-    @loader.command(ru_doc="Показать доступные модели Grok AI")
-    async def grokmodels(self, message):
-        """Показать доступные модели Grok AI"""
-        await utils.answer(
-            message, 
-            self.strings["available_models"].format(current_model=self.config["model"])
-        )
-
     @loader.command(ru_doc="Задать вопрос Grok AI")
     async def grok(self, message):
         """Задать вопрос к Grok"""
@@ -486,72 +462,3 @@ class GrokAI(loader.Module):
                 status_message, 
                 self.strings["error"].format(error=str(e))
             )
-
-    @loader.command(ru_doc="Расшифровать голосовое сообщение с помощью Grok AI")
-    async def grokv(self, message):
-        """Расшифровать голосовое сообщение с помощью Grok AI"""
-        reply_to = await message.get_reply_message()
-        
-        if not reply_to or not reply_to.media:
-            return await utils.answer(
-                message, 
-                self.strings["no_args"].format(self.get_prefix(), "groktranscribe", "[ответ на голосовое]")
-            )
-            
-        if not self.config['api_key']:
-            return await utils.answer(message, self.strings["no_token"].format(self.get_prefix()))
-            
-        # Отправляем статус ожидания
-        status_message = await utils.answer(message, self.strings['transcribing_audio'])
-        if isinstance(status_message, list):
-            status_message = status_message[0]
-            
-        try:
-            # Загружаем медиа
-            media_data = await self._process_media_content(reply_to)
-            
-            if not media_data or media_data.get("media_type") not in ["audio"]:
-                await self._cleanup_media(media_data["file_path"] if media_data else None)
-                return await utils.answer(status_message, self.strings["no_media"])
-                
-            # Создаем запрос к Grok API для транскрибации
-            data = {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "Расшифруй это голосовое сообщение максимально точно"
-                            },
-                            *media_data["content_parts"]
-                        ]
-                    }
-                ],
-                "model": self.config["model"],
-                "max_tokens": self.config["max_tokens"],
-                "temperature": 0.3,  # Используем низкую температуру для более точной расшифровки
-            }
-            
-            # Отправляем запрос
-            response = self._make_grok_request("chat/completions", data)
-            
-            # Получаем ответ
-            transcription = response["choices"][0]["message"]["content"]
-            
-            # Форматируем и отправляем ответ
-            await utils.answer(
-                status_message,
-                f"<emoji document_id=5314250708508220914>✅</emoji> <b>Расшифровка голосового сообщения:</b>\n\n{transcription}"
-            )
-            
-        except Exception as e:
-            logger.error(f"Error in Grok AI audio transcription: {e}")
-            await utils.answer(
-                status_message, 
-                self.strings["error"].format(error=str(e))
-            )
-        finally:
-            # Очищаем временные файлы
-            if media_data:
-                await self._cleanup_media(media_data.get("file_path")))
