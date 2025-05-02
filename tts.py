@@ -36,69 +36,6 @@ class TTSMod(loader.Module):
     }
 
     def __init__(self):
-        self.config = loader.ModuleConfig(
-            # Основные настройки
-            "api_key", "", "API ключ от ElevenLabs (получи на elevenlabs.io)",
-            "model_id", "eleven_multilingual_v2", "ID модели (eleven_multilingual_v2, eleven_monolingual_v1, eleven_turbo_v2)",
-            
-            # Настройки голоса
-            "voice_type", "male", "Тип голоса по умолчанию (male/female)",
-            "stability", 0.5, "Стабильность голоса (0.0-1.0, где 0.0 - хаотичный пиздец, 1.0 - ровно как робот)",
-            "similarity_boost", 0.75, "Схожесть голоса с оригиналом (0.0-1.0, где 0.0 - пьяный в хлам, 1.0 - будто клон)",
-            
-            # Настройки стиля речи
-            "style", 0.7, "Степень экспрессии (0.0-1.0, где 0.0 - уныло, 1.0 - пиздец эмоционально)",
-            "use_speaker_boost", True, "Улучшение чёткости голоса (True/False)",
-            
-            # Настройки звука
-            "volume_adjustment_db", 0, "Корректировка громкости (+/- дБ)",
-            
-            # Кастомные голоса для языков (мужские)
-            "male_voices", {
-                "ru": "jsCqWAovK2LkecY7zXl4", # Баста (русский)
-                "en": "pNInz6obpgDQGcFmaJgB", # Adam (английский)
-                "uk": "mTSvIrm2hmcxR9Mew3mV", # Олег (украинский)
-                "de": "IKne3meq5aSn9XLyUdCD", # Hans (немецкий)
-                "fr": "ODnIvQq3BiMoMQCE5PUa", # Pierre (французский)
-                "es": "ErXwobaYiN019PkySvjV", # Antoni (испанский)
-                "it": "Yko7PKHZNXotIFUBG7I9", # Lorenzo (итальянский)
-                "ja": "zbkzjolmHyMVm0yBNMDt", # Hiroshi (японский)
-                "zh": "TxGEqnHWrfWFTfGW9XjX", # Lee (китайский)
-                "ar": "t0jbNlBVZ17f02VDIeMI", # Ahmed (арабский)
-                "hi": "XB0fDUnXU5powFXDhCwa", # Ajay (хинди)
-                "ko": "ZCYOGA6EZ7RMuiMwDQ3d", # Jin (корейский)
-                "pt": "FLvDGyVHxPJXnWmYSV98", # Mateus (португальский)
-                "default": "pNInz6obpgDQGcFmaJgB", # Adam (если не нашлось подходящего языка)
-            },
-            
-            # Кастомные голоса для языков (женские)
-            "female_voices", {
-                "ru": "0G2aDhfNxRTGnEUYb3xd", # Ксения (русский)
-                "en": "EXAVITQu4vr4xnSDxMaL", # Rachel (английский)
-                "uk": "mVEDpXKqJZ4Q9YN36YDw", # Оксана (украинский)
-                "de": "JBFqnCBsd6RMkjVDRZzb", # Anna (немецкий)
-                "fr": "MF3mGyEYCl7XYWbV9V6O", # Nicole (французский)
-                "es": "H8ZpFUgUHLRQzw1pX2WT", # Sofia (испанский)
-                "it": "piTKgcLEGmPE4e6mEKli", # Valentina (итальянский)
-                "ja": "zcAOhNBS3c14rBihAFp1", # Yuki (японский)
-                "zh": "zhTTFinSZ1tgH9SZyuD4", # Lin (китайский)
-                "ar": "iP95p4xoKVk53GoZ742B", # Leila (арабский)
-                "hi": "pMsXgVXv3BLzUgSXRplE", # Priya (хинди)
-                "ko": "DGBnDqJNcGn0InVTbnKN", # Ji-Min (корейский)
-                "pt": "CYw3kZ02Hs0563khs1Fj", # Isabella (португальский)
-                "default": "EXAVITQu4vr4xnSDxMaL", # Rachel (если не нашлось подходящего языка)
-            },
-            
-            # Настройки функционала
-            "delete_original", True, "Удалять ли исходное сообщение после отправки голосового",
-            "max_length", 500, "Максимальная длина текста (ограничение API, не больше 2000)",
-            "response_timeout", 30, "Таймаут ожидания ответа от API (в секундах)",
-            "chunk_size", 1024, "Размер чанка при скачивании (не трогай, если не шаришь)",
-            "use_proxy", False, "Использовать прокси для запросов к API",
-            "proxy_url", "", "URL прокси в формате http://user:pass@host:port"
-        )
-        
-        # Инициализация базовых переменных
         self._temp_file = os.path.join("/tmp", f"tts_output_{random.randint(1000, 9999)}.mp3")
         self._processing = False
         self._language_mapping = {
@@ -109,6 +46,161 @@ class TTSMod(loader.Module):
             "ar-sa": "ar", "hi-in": "hi"
         }
         
+        # Инициализация конфига - перенесена в отдельный метод
+        self.config = loader.ModuleConfig()
+
+    def get_config(self):
+        """Инициализация конфига - вынесена отдельно, чтобы модуль корректно загружался"""
+        return [
+            # Основные настройки
+            loader.ConfigValue(
+                "api_key",
+                "",
+                "API ключ от ElevenLabs (получи на elevenlabs.io)",
+                validator=loader.validators.String()
+            ),
+            loader.ConfigValue(
+                "model_id",
+                "eleven_multilingual_v2",
+                "ID модели (eleven_multilingual_v2, eleven_monolingual_v1, eleven_turbo_v2)",
+                validator=loader.validators.String()
+            ),
+            
+            # Настройки голоса
+            loader.ConfigValue(
+                "voice_type",
+                "male",
+                "Тип голоса по умолчанию (male/female)",
+                validator=loader.validators.Choice(["male", "female"])
+            ),
+            loader.ConfigValue(
+                "stability",
+                0.5,
+                "Стабильность голоса (0.0-1.0, где 0.0 - хаотичный пиздец, 1.0 - ровно как робот)",
+                validator=loader.validators.Float(minimum=0.0, maximum=1.0)
+            ),
+            loader.ConfigValue(
+                "similarity_boost",
+                0.75,
+                "Схожесть голоса с оригиналом (0.0-1.0, где 0.0 - пьяный в хлам, 1.0 - будто клон)",
+                validator=loader.validators.Float(minimum=0.0, maximum=1.0)
+            ),
+            
+            # Настройки стиля речи
+            loader.ConfigValue(
+                "style",
+                0.7,
+                "Степень экспрессии (0.0-1.0, где 0.0 - уныло, 1.0 - пиздец эмоционально)",
+                validator=loader.validators.Float(minimum=0.0, maximum=1.0)
+            ),
+            loader.ConfigValue(
+                "use_speaker_boost",
+                True,
+                "Улучшение чёткости голоса (True/False)",
+                validator=loader.validators.Boolean()
+            ),
+            
+            # Настройки звука
+            loader.ConfigValue(
+                "volume_adjustment_db",
+                0,
+                "Корректировка громкости (+/- дБ)",
+                validator=loader.validators.Integer()
+            ),
+            
+            # Кастомные голоса для языков (мужские)
+            loader.ConfigValue(
+                "male_voices",
+                {
+                    "ru": "jsCqWAovK2LkecY7zXl4",  # Баста (русский)
+                    "en": "pNInz6obpgDQGcFmaJgB",  # Adam (английский)
+                    "uk": "mTSvIrm2hmcxR9Mew3mV",  # Олег (украинский)
+                    "de": "IKne3meq5aSn9XLyUdCD",  # Hans (немецкий)
+                    "fr": "ODnIvQq3BiMoMQCE5PUa",  # Pierre (французский)
+                    "es": "ErXwobaYiN019PkySvjV",  # Antoni (испанский)
+                    "it": "Yko7PKHZNXotIFUBG7I9",  # Lorenzo (итальянский)
+                    "ja": "zbkzjolmHyMVm0yBNMDt",  # Hiroshi (японский)
+                    "zh": "TxGEqnHWrfWFTfGW9XjX",  # Lee (китайский)
+                    "ar": "t0jbNlBVZ17f02VDIeMI",  # Ahmed (арабский)
+                    "hi": "XB0fDUnXU5powFXDhCwa",  # Ajay (хинди)
+                    "ko": "ZCYOGA6EZ7RMuiMwDQ3d",  # Jin (корейский)
+                    "pt": "FLvDGyVHxPJXnWmYSV98",  # Mateus (португальский)
+                    "default": "pNInz6obpgDQGcFmaJgB",  # Adam (если не нашлось подходящего языка)
+                },
+                "Словарь голосов для мужских языков",
+                validator=loader.validators.Dict(
+                    {
+                        loader.validators.String(): loader.validators.String()
+                    }
+                )
+            ),
+            
+            # Кастомные голоса для языков (женские)
+            loader.ConfigValue(
+                "female_voices",
+                {
+                    "ru": "0G2aDhfNxRTGnEUYb3xd",  # Ксения (русский)
+                    "en": "EXAVITQu4vr4xnSDxMaL",  # Rachel (английский)
+                    "uk": "mVEDpXKqJZ4Q9YN36YDw",  # Оксана (украинский)
+                    "de": "JBFqnCBsd6RMkjVDRZzb",  # Anna (немецкий)
+                    "fr": "MF3mGyEYCl7XYWbV9V6O",  # Nicole (французский)
+                    "es": "H8ZpFUgUHLRQzw1pX2WT",  # Sofia (испанский)
+                    "it": "piTKgcLEGmPE4e6mEKli",  # Valentina (итальянский)
+                    "ja": "zcAOhNBS3c14rBihAFp1",  # Yuki (японский)
+                    "zh": "zhTTFinSZ1tgH9SZyuD4",  # Lin (китайский)
+                    "ar": "iP95p4xoKVk53GoZ742B",  # Leila (арабский)
+                    "hi": "pMsXgVXv3BLzUgSXRplE",  # Priya (хинди)
+                    "ko": "DGBnDqJNcGn0InVTbnKN",  # Ji-Min (корейский)
+                    "pt": "CYw3kZ02Hs0563khs1Fj",  # Isabella (португальский)
+                    "default": "EXAVITQu4vr4xnSDxMaL",  # Rachel (если не нашлось подходящего языка)
+                },
+                "Словарь голосов для женских языков",
+                validator=loader.validators.Dict(
+                    {
+                        loader.validators.String(): loader.validators.String()
+                    }
+                )
+            ),
+            
+            # Настройки функционала
+            loader.ConfigValue(
+                "delete_original",
+                True,
+                "Удалять ли исходное сообщение после отправки голосового",
+                validator=loader.validators.Boolean()
+            ),
+            loader.ConfigValue(
+                "max_length",
+                500,
+                "Максимальная длина текста (ограничение API, не больше 2000)",
+                validator=loader.validators.Integer(minimum=1, maximum=2000)
+            ),
+            loader.ConfigValue(
+                "response_timeout",
+                30,
+                "Таймаут ожидания ответа от API (в секундах)",
+                validator=loader.validators.Integer(minimum=5, maximum=300)
+            ),
+            loader.ConfigValue(
+                "chunk_size",
+                1024,
+                "Размер чанка при скачивании (не трогай, если не шаришь)",
+                validator=loader.validators.Integer(minimum=256, maximum=8192)
+            ),
+            loader.ConfigValue(
+                "use_proxy",
+                False,
+                "Использовать прокси для запросов к API",
+                validator=loader.validators.Boolean()
+            ),
+            loader.ConfigValue(
+                "proxy_url",
+                "",
+                "URL прокси в формате http://user:pass@host:port",
+                validator=loader.validators.String()
+            )
+        ]
+                
     async def _get_voice_id(self, text: str) -> str:
         """Умная определялка какой нахуй голос подойдёт для текста"""
         try:
