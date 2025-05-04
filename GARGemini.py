@@ -1,4 +1,4 @@
-# meta developer: @sunshinelzt (адаптировано для Gemini API)
+# meta developer: @sunshinelzt
 
 # @sunshinelzt
 # Licensed under GNU AGPLv3
