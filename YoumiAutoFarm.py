@@ -18,6 +18,9 @@ EMOJI_PILOT = "<emoji document_id=5231313240755030628>✈️</emoji>"
 EMOJI_STOP = "<emoji document_id=6046437019230409156>🤩</emoji>"
 EMOJI_STATUS = "<emoji document_id=6046362462893118557>🤩</emoji>"
 
+# Фиксированный ID бота вместо юзернейма
+BOT_ID = 7900445600  # ID для @itsYoumi_Bot
+
 class YoumiAutoFarmMod(loader.Module):
     """Автофарм для бота @itsYoumi_Bot"""
     
@@ -31,9 +34,8 @@ class YoumiAutoFarmMod(loader.Module):
     
     def __init__(self):
         self.config = loader.ModuleConfig(
-            "randon_min", 10, "Минимальная случайная задержка (секунды)",
+            "random_min", 10, "Минимальная случайная задержка (секунды)",
             "random_max", 60, "Максимальная случайная задержка (секунды)",
-            "bot_username", "itsYoumi_Bot", "Юзернейм целевого бота",
         )
         self.jobs = {}
         self.last_action_time = None
@@ -47,16 +49,18 @@ class YoumiAutoFarmMod(loader.Module):
     async def _send_message_to_bot(self, message):
         """Отправляет сообщение боту с имитацией человека"""
         try:
-            delay = random.randint(self.config["random_min"], self.config["random_max"])
+            # Убедимся, что конфиг содержит валидные целые числа
+            min_delay = int(self.config["random_min"]) 
+            max_delay = int(self.config["random_max"])
+            
+            # Генерация случайной задержки
+            delay = random.randint(min_delay, max_delay)
             await asyncio.sleep(delay)
             
             self.last_action_time = datetime.now().strftime("%H:%M:%S")
             
-            await self._client.send_message(self.config["bot_username"], message)
-            logger.info(f"Сообщение '{message}' отправлено боту @{self.config['bot_username']}")
-            
-        except Exception as e:
-            logger.error(f"Ошибка при отправке сообщения: {e}")
+            # Используем фиксированный ID бота вместо юзернейма
+            await self._client.send_message(BOT_ID, message)
 
     async def _job_worker(self, job_name, job_message, interval_minutes):
         """Основной воркер для автофарма"""
@@ -64,18 +68,13 @@ class YoumiAutoFarmMod(loader.Module):
             while job_name in self.jobs:
                 await self._send_message_to_bot(job_message)
                 
+                # Добавляем случайность к интервалу для имитации человека
                 random_error = random.randint(10, 60)
                 
                 total_wait = (interval_minutes * 60) + random_error
                 
                 await asyncio.sleep(total_wait)
-                
-        except asyncio.CancelledError:
-            logger.info(f"Задача {job_name} отменена")
-            pass
-        except Exception as e:
-            logger.error(f"Ошибка в работе автофарма {job_name}: {e}")
-
+            
     async def _start_job(self, message, job_name, job_message, emoji, interval_minutes):
         """Запускает новую задачу автофарма"""
         if job_name in self.jobs:
