@@ -1,6 +1,4 @@
-# ⚙️ Модуль: auto_jobs_youmi.py
-# ✍️ Автор: @sunshinelzt (по заказу Валентина)
-# 🐒 За рофлы, код и бессонницу не судите строго
+# meta developer: @sunshinelzt
 
 from telethon.tl.functions.messages import SendMessageRequest
 from hikkatl.types import Message
