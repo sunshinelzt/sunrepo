@@ -61,6 +61,10 @@ class YoumiAutoFarmMod(loader.Module):
             
             # Используем фиксированный ID бота вместо юзернейма
             await self._client.send_message(BOT_ID, message)
+            logger.info(f"Сообщение '{message}' отправлено боту ID: {BOT_ID}")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при отправке сообщения: {e}")
 
     async def _job_worker(self, job_name, job_message, interval_minutes):
         """Основной воркер для автофарма"""
@@ -74,7 +78,13 @@ class YoumiAutoFarmMod(loader.Module):
                 total_wait = (interval_minutes * 60) + random_error
                 
                 await asyncio.sleep(total_wait)
-            
+                
+        except asyncio.CancelledError:
+            logger.info(f"Задача {job_name} отменена")
+            pass
+        except Exception as e:
+            logger.error(f"Ошибка в работе автофарма {job_name}: {e}")
+
     async def _start_job(self, message, job_name, job_message, emoji, interval_minutes):
         """Запускает новую задачу автофарма"""
         if job_name in self.jobs:
