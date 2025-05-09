@@ -1,144 +1,102 @@
-# meta developer: @sunshinelzt
+# ⚙️ Модуль: auto_jobs_youmi.py
+# ✍️ Автор: @sunshinelzt (по заказу Валентина)
+# 🐒 За рофлы, код и бессонницу не судите строго
 
-import random
-import asyncio
-import logging
-from datetime import datetime, timedelta
-from telethon import types
-
+from telethon.tl.functions.messages import SendMessageRequest
+from hikkatl.types import Message
 from .. import loader, utils
+import asyncio
+import random
 
-logger = logging.getLogger(__name__)
+# Эмоджи (меняй под себя)
+EMOJIS = {
+    "police": "👮",
+    "psych": "🧠",
+    "doc": "🩺",
+    "prog": "💻",
+    "pilot": "✈️",
+    "start": "▶️",
+    "stop": "⛔",
+    "tick": "✅",
+    "cross": "❌"
+}
 
-EMOJI_POLICE = "<emoji document_id=6046437075064985000>👮</emoji>"
-EMOJI_PSYCHO = "<emoji document_id=5397681122542893003>🤖</emoji>"
-EMOJI_DOCTOR = "<emoji document_id=6046335370239416531>🌟</emoji>"
-EMOJI_PROGRAMMER = "<emoji document_id=5855239622266720596>👨‍💻</emoji>"
-EMOJI_PILOT = "<emoji document_id=5231313240755030628>✈️</emoji>"
-EMOJI_STOP = "<emoji document_id=6046437019230409156>🤩</emoji>"
-EMOJI_STATUS = "<emoji document_id=6046362462893118557>🤩</emoji>"
+# Профессии и тайминги (в секундах)
+JOBS = {
+    "полицейский": 300,
+    "психолог": 420,
+    "врач": 600,
+    "программист": 900,
+    "пилот": 1500
+}
 
-# Фиксированный ID бота вместо юзернейма
-BOT_ID = 7900445600  # ID для @itsYoumi_Bot
 
-class YoumiAutoFarmMod(loader.Module):
-    """Автофарм для бота @itsYoumi_Bot"""
-    
+@loader.tds
+class AutoYoumiJobsMod(loader.Module):
+    """Автофарм профессий в @itsYoumi_Bot (боту хоть бы хны)"""
+
     strings = {
-        "name": "YoumiAutoFarm",
-        "job_started": "<b>{} Ебашим автофарм {}! Погнали нахуй!</b>",
-        "job_stopped": "<b>{} Автофарм остановлен нахуй!</b>",
-        "job_status": "<b>{} Че там по автофарму:</b>\n{}\n<i>Последнее действие: {}</i>",
-        "no_active_jobs": "<b>Нихуя не запущено, ленивая жопа!</b>",
+        "name": "AutoYoumiJobs",
     }
-    
+
     def __init__(self):
-        self.config = loader.ModuleConfig(
-            "random_min", 10, "Минимальная случайная задержка (секунды)",
-            "random_max", 60, "Максимальная случайная задержка (секунды)",
-        )
-        self.jobs = {}
-        self.last_action_time = None
-        self.name = self.strings["name"]
-    
-    async def client_ready(self, client, db):
-        self._db = db
-        self._client = client
-        self._me = await client.get_me()
+        self.job_task = None
+        self.running = False
 
-    async def _send_message_to_bot(self, message):
-        """Отправляет сообщение боту с имитацией человека"""
-        try:
-            # Убедимся, что конфиг содержит валидные целые числа
-            min_delay = int(self.config["random_min"]) 
-            max_delay = int(self.config["random_max"])
-            
-            # Генерация случайной задержки
-            delay = random.randint(min_delay, max_delay)
-            await asyncio.sleep(delay)
-            
-            self.last_action_time = datetime.now().strftime("%H:%M:%S")
-            
-            # Используем фиксированный ID бота вместо юзернейма
-            await self._client.send_message(BOT_ID, message)
-            logger.info(f"Сообщение '{message}' отправлено боту ID: {BOT_ID}")
-            
-        except Exception as e:
-            logger.error(f"Ошибка при отправке сообщения: {e}")
+    @loader.command()
+    async def ajob(self, message: Message):
+        """- <профессия> — начать фармить"""
+        args = utils.get_args_raw(message).lower().strip()
 
-    async def _job_worker(self, job_name, job_message, interval_minutes):
-        """Основной воркер для автофарма"""
-        try:
-            while job_name in self.jobs:
-                await self._send_message_to_bot(job_message)
-                
-                # Добавляем случайность к интервалу для имитации человека
-                random_error = random.randint(10, 60)
-                
-                total_wait = (interval_minutes * 60) + random_error
-                
-                await asyncio.sleep(total_wait)
-                
-        except asyncio.CancelledError:
-            logger.info(f"Задача {job_name} отменена")
-            pass
-        except Exception as e:
-            logger.error(f"Ошибка в работе автофарма {job_name}: {e}")
-
-    async def _start_job(self, message, job_name, job_message, emoji, interval_minutes):
-        """Запускает новую задачу автофарма"""
-        if job_name in self.jobs:
-            self.jobs[job_name].cancel()
-            
-        task = asyncio.create_task(self._job_worker(job_name, job_message, interval_minutes))
-        self.jobs[job_name] = task
-        
-        await utils.answer(
-            message, 
-            self.strings["job_started"].format(emoji, job_name)
-        )
-
-    async def ym_pcmd(self, message):
-        """Запускает автофарм полицейского"""
-        await self._start_job(message, "Полицейский", "Полицейский", EMOJI_POLICE, 5)
-
-    async def ym_psycmd(self, message):
-        """Запускает автофарм психолога"""
-        await self._start_job(message, "Психолог", "Психолог", EMOJI_PSYCHO, 7)
-
-    async def ym_doccmd(self, message):
-        """Запускает автофарм врача"""
-        await self._start_job(message, "Врач", "Врач", EMOJI_DOCTOR, 10)
-
-    async def ym_devcmd(self, message):
-        """Запускает автофарм программиста"""
-        await self._start_job(message, "Программист", "Программист", EMOJI_PROGRAMMER, 15)
-
-    async def ym_pilcmd(self, message):
-        """Запускает автофарм пилота"""
-        await self._start_job(message, "Пилот", "Пилот", EMOJI_PILOT, 25)
-
-    async def ym_stopcmd(self, message):
-        """Останавливает все задачи автофарма"""
-        for job_name, task in self.jobs.items():
-            task.cancel()
-        
-        self.jobs.clear()
-        
-        await utils.answer(message, self.strings["job_stopped"].format(EMOJI_STOP))
-
-    async def ym_statcmd(self, message):
-        """Показывает статус автофарма"""
-        if not self.jobs:
-            await utils.answer(message, self.strings["no_active_jobs"])
+        if not args or args not in JOBS:
+            await message.edit(
+                f"{EMOJIS['cross']} <b>Ебать, напиши норм профессию:</b><br>" +
+                "<br>".join([f"• <b>{k}</b>" for k in JOBS.keys()]),
+                parse_mode="HTML"
+            )
             return
-            
-        status_text = ""
-        for job_name in self.jobs:
-            status_text += f"<emoji document_id=5436402945660838021>🔁</emoji> <b>{job_name}</b> работает\n"
-            
-        last_action = self.last_action_time if self.last_action_time else "Нет действий"
-        await utils.answer(
-            message, 
-            self.strings["job_status"].format(EMOJI_STATUS, status_text, last_action)
+
+        if self.running:
+            await message.edit(
+                f"{EMOJIS['cross']} <b>Уже жрёт проц... Останови сначала!</b>",
+                parse_mode="HTML"
+            )
+            return
+
+        delay = JOBS[args]
+        self.running = True
+        await message.edit(
+            f"{EMOJIS['start']} <b>Запущен фарм для профессии:</b> <i>{args}</i><br>"
+            f"<b>Интервал:</b> {delay // 60} мин",
+            parse_mode="HTML"
+        )
+
+        async def job_loop():
+            while self.running:
+                rand_delay = random.randint(10, 60)
+                total_delay = delay + rand_delay
+                await self._client(SendMessageRequest(
+                    peer="@itsYoumi_Bot",
+                    message=args.capitalize(),
+                    no_webpage=True
+                ))
+                await asyncio.sleep(total_delay)
+
+        self.job_task = asyncio.create_task(job_loop())
+
+    @loader.command()
+    async def sjob(self, message: Message):
+        """— остановить фарм"""
+        if not self.running:
+            await message.edit(
+                f"{EMOJIS['tick']} <b>Да ничё и не работало, бродяга.</b>",
+                parse_mode="HTML"
+            )
+            return
+        self.running = False
+        self.job_task.cancel()
+        self.job_task = None
+        await message.edit(
+            f"{EMOJIS['stop']} <b>Забил на работу. Профессия нахрен ушла.</b>",
+            parse_mode="HTML"
         )
