@@ -1,3 +1,5 @@
+# meta developer: @sunshinelzt
+
 import random
 import asyncio
 import logging
