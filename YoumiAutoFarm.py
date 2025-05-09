@@ -31,9 +31,9 @@ class YoumiAutoFarmMod(loader.Module):
     
     def __init__(self):
         self.config = loader.ModuleConfig(
-            "RANDOM_MIN", 10, "Минимальная случайная задержка (секунды)",
-            "RANDOM_MAX", 60, "Максимальная случайная задержка (секунды)",
-            "BOT_USERNAME", "itsYoumi_Bot", "Юзернейм целевого бота",
+            "randon_min", 10, "Минимальная случайная задержка (секунды)",
+            "random_max", 60, "Максимальная случайная задержка (секунды)",
+            "bot_username", "itsYoumi_Bot", "Юзернейм целевого бота",
         )
         self.jobs = {}
         self.last_action_time = None
