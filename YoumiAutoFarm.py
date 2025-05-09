@@ -8,15 +8,15 @@ import random
 
 # Эмоджи (меняй под себя)
 EMOJIS = {
-    "police": "👮",
-    "psych": "🧠",
-    "doc": "🩺",
-    "prog": "💻",
-    "pilot": "✈️",
-    "start": "▶️",
-    "stop": "⛔",
-    "tick": "✅",
-    "cross": "❌"
+    "police": "<emoji document_id=6046437075064985000>👮</emoji>",
+    "psych": "<emoji document_id=6046439609095689718>🤩</emoji>",
+    "doc": "<emoji document_id=6046335370239416531>🌟</emoji>",
+    "prog": "<emoji document_id=6046362462893118557>🤩</emoji>",
+    "pilot": "<emoji document_id=6046513791770825256>🌟</emoji>",
+    "start": "<emoji document_id=6046410905829251121>💥</emoji>",
+    "stop": "<emoji document_id=6046217396077728534>😡</emoji>",
+    "tick": "<emoji document_id=6044327262575141199>🌟</emoji>",
+    "cross": "<emoji document_id=6046437019230409156>🤩</emoji>"
 }
 
 # Профессии и тайминги (в секундах)
@@ -31,7 +31,7 @@ JOBS = {
 
 @loader.tds
 class AutoYoumiJobsMod(loader.Module):
-    """Автофарм профессий в @itsYoumi_Bot (боту хоть бы хны)"""
+    """Автофарм работы в @itsYoumi_Bot"""
 
     strings = {
         "name": "AutoYoumiJobs",
@@ -65,7 +65,7 @@ class AutoYoumiJobsMod(loader.Module):
         self.running = True
         await message.edit(
             f"{EMOJIS['start']} <b>Запущен фарм для профессии:</b> <i>{args}</i><br>"
-            f"<b>Интервал:</b> {delay // 60} мин",
+            f"\n<b>Интервал:</b> {delay // 60} мин",
             parse_mode="HTML"
         )
 
@@ -87,7 +87,7 @@ class AutoYoumiJobsMod(loader.Module):
         """— остановить фарм"""
         if not self.running:
             await message.edit(
-                f"{EMOJIS['tick']} <b>Да ничё и не работало, бродяга.</b>",
+                f"{EMOJIS['tick']} <b>Да ничё и не работало, малой.</b>",
                 parse_mode="HTML"
             )
             return
@@ -95,6 +95,6 @@ class AutoYoumiJobsMod(loader.Module):
         self.job_task.cancel()
         self.job_task = None
         await message.edit(
-            f"{EMOJIS['stop']} <b>Забил на работу. Профессия нахрен ушла.</b>",
+            f"{EMOJIS['stop']} <b>Нахуй работу.</b>",
             parse_mode="HTML"
         )
