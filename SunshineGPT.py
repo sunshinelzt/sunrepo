@@ -13,180 +13,124 @@ __version__ = (1, 4, 8, 8)
 import google.generativeai as genai
 import os
 import time
-import io
-import json
 import asyncio
+import mimetypes
 import random
-import hashlib
-from typing import Tuple, Optional, Dict, Any, List, Union, Callable
+from typing import Optional, List, Union
 import logging
 from contextlib import suppress
-from functools import wraps, lru_cache
+from functools import wraps
 from PIL import Image
 from .. import loader, utils
-import aiohttp
-from telethon import events
-
 
 logger = logging.getLogger(__name__)
 
 
-def retry_decorator(max_retries=3, delay_base=2):
+def retry_decorator(max_retries: int = 3, delay_base: float = 2.0):
     """Декоратор для повторных попыток выполнения функции при ошибках"""
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
+            last_exception = None
             for attempt in range(max_retries):
                 try:
                     return await func(*args, **kwargs)
                 except Exception as e:
-                    logger.error(f"Error in {func.__name__} (attempt {attempt+1}/{max_retries}): {str(e)}")
+                    last_exception = e
+                    logger.warning(
+                        f"Попытка {attempt + 1}/{max_retries} для {func.__name__} неудачна: {e}"
+                    )
                     if attempt == max_retries - 1:
-                        raise
+                        break
+                    
                     wait_time = delay_base ** attempt
                     await asyncio.sleep(wait_time)
+            
+            raise last_exception
         return wrapper
     return decorator
 
 
 @loader.tds
 class SunshineGPT(loader.Module):
-    """Продвинутый модуль для работы с Google Gemini AI и генерации изображений"""
+    """Улучшенный модуль для работы с Google Gemini AI"""
 
     strings = {
         "name": "SunshineGPT",
-        # Общие сообщения
-        "no_api_key": "<emoji document_id=5274099962655816924>❗️</emoji> <b>API ключ не указан. Получите его на aistudio.google.com/apikey</b>",
-        "no_prompt": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Введите запрос или ответьте на сообщение (изображение, видео, GIF, стикер, голосовое)</b>",
-        "processing": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>{}</b>",
-        "request_sent": "<emoji document_id=5325547803936572038>✨</emoji> <b>Запрос отправлен, ожидайте ответ...</b>",
-        "generating_image": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>Сервер генерирует картинку, пожалуйста, подождите...</b>",
-        "describe_this": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>Опиши это...</b>",
-        "error": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Ошибка:</b> {}",
-        "server_error": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Ошибка сервера:</b> {}",
-        "empty_response": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Ответ пустой. Попробуйте переформулировать запрос.</b>",
-        "no_image_prompt": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Пожалуйста, укажите описание для генерации изображения.</b>",
-        "image_caption": "<blockquote><emoji document_id=5465143921912846619>💭</emoji> <b>Промт:</b> <code>{prompt}</code></blockquote>\n"
-                         "<blockquote><emoji document_id=5877260593903177342>⚙️</emoji> <b>Модель:</b> <code>{model}</code></blockquote>\n"
-                         "<blockquote><emoji document_id=5199457120428249992>🕘</emoji> <b>Время генерации:</b> {time} сек.</blockquote>",
-        "collecting_history": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>Собираю историю сообщений для {}...</b>",
-        "collecting_chat": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>Собираю историю чата...</b>",
-        "user_analysis_title": "<emoji document_id=5873121512445187130>❓</emoji> <b>Что сегодня обсуждал {}?</b>",
-        "chat_analysis_title": "<emoji document_id=5873121512445187130>❓</emoji> <b>Что сегодня обсуждали участники чата?</b>",
-        "empty_media": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Не удалось открыть медиа:</b> {}",
-        "empty_content": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Ошибка: Запрос должен содержать текст или медиа.</b>",
-        "gemini_response": "<emoji document_id=5325547803936572038>✨</emoji> <b>Ответ от Gemini:</b> {} {}",
-        "question": "<emoji document_id=5443038326535759644>💬</emoji> <b>Вопрос:</b> {}",
-        "gemini_models": "<emoji document_id=5325547803936572038>✨</emoji> <b>Доступные модели Gemini:</b>\n\n{}\n\n<b>Текущая модель:</b> <code>{}</code>\n\n<b>Для изменения модели используйте:</b>\n<code>.config SunshineGPT model_name новая_модель</code>",
-        "help_text": "<emoji document_id=5325547803936572038>✨</emoji> <b>SunshineGPT</b>\n\n<b>Основные команды:</b>\n• <code>.gpt запрос</code> - отправить запрос к Gemini\n• <code>.gimg промпт</code> - сгенерировать изображение\n• <code>.ghist</code> - анализ истории чата (можно с ответом на сообщение)\n• <code>.gmodels</code> - показать доступные модели Gemini\n• <code>.ghelp</code> - показать эту справку\n\n<b>Работа с медиа:</b>\nОтветьте на изображение/видео/стикер с командой <code>.gpt</code>\n\n<b>Автообработка сообщений:</b>\nМодуль может автоматически обрабатывать сообщения при упоминании бота",
-        "auto_processing_enabled": "<emoji document_id=5325547803936572038>✨</emoji> <b>Автоматическая обработка сообщений включена</b>",
-        "auto_processing_disabled": "<emoji document_id=5274099962655816924>❗️</emoji> <b>Автоматическая обработка сообщений отключена</b>",
-        "processing_media": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>Обрабатываю медиа...</b>",
-        "audio_transcribing": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>Транскрибирую аудио...</b>",
-        "video_analyzing": "<emoji document_id=5386367538735104399>⌛️</emoji> <b>Анализирую видео...</b>",
+        "no_api_key": "<emoji document_id=6005570495603282482>🔑</emoji> <b>API ключ не указан!</b>\n\n"
+                     "Получите ключ на: <code>aistudio.google.com/apikey</code>\n"
+                     "Установите через: <code>.config SunshineGPT api_key ВАШ_КЛЮЧ</code>",
+        "no_prompt": "<emoji document_id=5884510167986343350>💬</emoji> <b>Использование команды:</b>\n\n"
+                    "• <code>.gpt ваш вопрос</code> - задать вопрос\n"
+                    "• <code>.gpt</code> (ответ на медиа) - анализ медиа\n"
+                    "• <code>.gpt ваш вопрос</code> (ответ на медиа) - вопрос о медиа",
+        "processing": "<emoji document_id=5931415565955503486>🤖</emoji> <b>Gemini обрабатывает запрос...</b>",
+        "processing_media": "<emoji document_id=5775949822993371030>🖼</emoji> <b>Анализирую медиа...</b>",
+        "processing_audio": "<emoji document_id=5891249688933305846>🎵</emoji> <b>Обрабатываю аудио...</b>",
+        "processing_video": "<emoji document_id=6005986106703613755>📷</emoji> <b>Анализирую видео...</b>",
+        "error": "<emoji document_id=5778527486270770928>❌</emoji> <b>Ошибка:</b> <code>{}</code>",
+        "empty_response": "<emoji document_id=5775887550262546277>❗️</emoji> <b>Gemini вернул пустой ответ</b>\n\n"
+                         "Попробуйте переформулировать запрос.",
+        "media_error": "<emoji document_id=5877332341331857066>📁</emoji> <b>Ошибка обработки медиа:</b> <code>{}</code>",
+        "unsupported_media": "<emoji document_id=5872829476143894491>🚫</emoji> <b>Неподдерживаемый тип медиа</b>\n\n"
+                            "Поддерживаются: изображения, видео, аудио, документы",
+        "response_header": "<emoji document_id=5931415565955503486>🤖</emoji> <b>Gemini:</b>\n\n",
+        "question_header": "<emoji document_id=5879585266426973039>🌐</emoji> <b>Вопрос:</b> {}\n\n",
     }
 
     def __init__(self):
         self.config = loader.ModuleConfig(
-            # Настройки Gemini
             loader.ConfigValue(
-                "api_key", 
-                "", 
-                "API ключ для Gemini AI (aistudio.google.com/apikey)", 
+                "api_key",
+                "",
+                "API ключ для Gemini AI",
                 validator=loader.validators.Hidden(loader.validators.String())
             ),
             loader.ConfigValue(
-                "model_name", 
-                "gemini-1.5-flash", 
-                "Модель для Gemini AI. Примеры: gemini-1.5-flash, gemini-1.5-pro, gemini-pro-vision, gemini-1.5-flash-preview, gemini-1.5-pro-preview, gemini-pro", 
+                "model_name",
+                "gemini-1.5-flash",
+                "Модель Gemini AI",
+                validator=loader.validators.Choice([
+                    "gemini-1.5-flash",
+                    "gemini-1.5-pro", 
+                    "gemini-1.5-flash-preview",
+                    "gemini-1.5-pro-preview",
+                    "gemini-pro",
+                    "gemini-pro-vision"
+                ])
+            ),
+            loader.ConfigValue(
+                "system_instruction",
+                "Ты полезный AI-ассистент. Отвечай кратко, информативно и дружелюбно.",
+                "Системная инструкция для AI",
                 validator=loader.validators.String()
             ),
             loader.ConfigValue(
-                "system_instruction", 
-                "", 
-                "Инструкция для Gemini AI", 
-                validator=loader.validators.String()
-            ),
-            
-            # Настройки для генерации изображений
-            loader.ConfigValue(
-                "api_key_image", 
-                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c", 
-                "Ключ для API генерации изображений (не изменяйте)", 
-                validator=loader.validators.Hidden(loader.validators.String())
+                "temperature",
+                0.7,
+                "Температура генерации (0.0-1.0)",
+                validator=loader.validators.Float(minimum=0.0, maximum=1.0)
             ),
             loader.ConfigValue(
-                "default_image_model", 
-                "flux", 
-                "Модель для генерации изображений. Примеры: flux, flux-pro, flux-dev, dall-e-3, midjourney", 
-                validator=loader.validators.String()
-            ),
-            
-            # Общие настройки
-            loader.ConfigValue(
-                "proxy", 
-                "", 
-                "Прокси в формате http://<user>:<pass>@<proxy>:<port>, или http://<proxy>:<port>", 
-                validator=loader.validators.String()
-            ),
-            loader.ConfigValue(
-                "max_retries", 
-                3, 
-                "Максимальное количество попыток отправки запроса", 
+                "max_retries",
+                3,
+                "Количество повторных попыток",
                 validator=loader.validators.Integer(minimum=1, maximum=5)
             ),
             loader.ConfigValue(
-                "timeout", 
-                60, 
-                "Таймаут в секундах для запросов к API", 
+                "timeout",
+                60,
+                "Таймаут запроса (секунды)",
                 validator=loader.validators.Integer(minimum=10, maximum=300)
             ),
             loader.ConfigValue(
-                "history_limit", 
-                400, 
-                "Количество сообщений для анализа истории", 
-                validator=loader.validators.Integer(minimum=50, maximum=1000)
-            ),
-            loader.ConfigValue(
-                "gemini_stream", 
-                False, 
-                "Использовать потоковую передачу ответов от Gemini (экспериментально)", 
-                validator=loader.validators.Boolean()
-            ),
-            loader.ConfigValue(
-                "temperature", 
-                0.7, 
-                "Температура для генерации (0.0 - точные ответы, 1.0 - творческие)", 
-                validator=loader.validators.Float(minimum=0.0, maximum=1.0)
-            ),
-            # Новые настройки для автоматической обработки
-            loader.ConfigValue(
-                "auto_processing", 
-                True, 
-                "Автоматически обрабатывать сообщения при упоминании бота", 
-                validator=loader.validators.Boolean()
-            ),
-            loader.ConfigValue(
-                "default_prompt", 
-                "Опиши это", 
-                "Стандартный запрос для обработки медиа без текста", 
+                "proxy",
+                "",
+                "HTTP прокси (http://proxy:port)",
                 validator=loader.validators.String()
-            ),
-            loader.ConfigValue(
-                "media_auto_process", 
-                True, 
-                "Автоматически обрабатывать медиа файлы", 
-                validator=loader.validators.Boolean()
-            ),
-            loader.ConfigValue(
-                "voice_transcription", 
-                True, 
-                "Транскрибировать голосовые сообщения", 
-                validator=loader.validators.Boolean()
-            ),
+            )
         )
         
-        # Список эмодзи для разнообразия ответов
         self.emojis = [
             "<emoji document_id=5440588507254896965>🤨</emoji>",
             "<emoji document_id=5443135817998416433>😕</emoji>",
@@ -272,601 +216,251 @@ class SunshineGPT(loader.Module):
             "<emoji document_id=5449728399524249126>🐻</emoji>",
             "<emoji document_id=5447440066718743386>🍺</emoji>",
             "<emoji document_id=5447153218737949833>🤦</emoji>",
-            "<emoji document_id=5447223407093497907>☺️</emoji>"
+            "<emoji document_id=5447223407093497907>☺️</emoji>",
+            "<emoji document_id=6046616063532078187>🇩🇪</emoji>",
+            "<emoji document_id=6046335370239416531>🌟</emoji>",
+            "<emoji document_id=6044327262575141199>🌟</emoji>",
+            "<emoji document_id=6046225998897223421>👀</emoji>",
+            "<emoji document_id=6046562814527543035>🤩</emoji>",
+            "<emoji document_id=6044261085719041523>😎</emoji>",
+            "<emoji document_id=6044091335726601513>🤩</emoji>",
+            "<emoji document_id=6046633015767996424>😋</emoji>",
+            "<emoji document_id=6046372495936721916>🤩</emoji>",
+            "<emoji document_id=6046236414192915496>😎</emoji>",
+            "<emoji document_id=6046410905829251121>💥</emoji>",
+            "<emoji document_id=6046322944899027585>🔪</emoji>",
+            "<emoji document_id=6044004585977157491>🌟</emoji>"
         ]
         
-        # Временный кэш для обработанных запросов
-        self._request_cache = {}
-        self._gemini_model = None
-        self._me = None
-        self._is_bot_mentioned = False
+        self._supported_mime_types = {
+            "image/jpeg", "image/jpg", "image/png", "image/gif", 
+            "image/webp", "image/bmp", "image/tiff",
+            "video/mp4", "video/avi", "video/mov", "video/webm",
+            "video/mkv", "video/flv", "video/wmv",
+            "audio/mp3", "audio/wav", "audio/ogg", "audio/m4a",
+            "audio/flac", "audio/aac", "audio/wma",
+            "application/pdf", "text/plain", "text/csv",
+            "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        }
 
     async def client_ready(self, client, db):
-        """Инициализация клиента"""
+        """Инициализация модуля"""
         self.client = client
         self.db = db
         
         if self.config["proxy"]:
             os.environ["HTTP_PROXY"] = self.config["proxy"]
             os.environ["HTTPS_PROXY"] = self.config["proxy"]
-            logger.info(f"Proxy set to {self.config['proxy']}")
-            
-        # Получаем информацию о нашем пользователе/боте
-        self._me = await client.get_me()
-        
-        # Регистрируем обработчик для всех входящих сообщений
-        client.add_event_handler(
-            self._message_handler, 
-            events.NewMessage(incoming=True)
-        )
-        
-        logger.info("SunshineGPT автоматическая обработка сообщений инициализирована")
+            logger.info(f"Прокси установлен: {self.config['proxy']}")
 
-    async def _message_handler(self, event):
-        """Обработчик всех входящих сообщений"""
-        
-        # Пропускаем, если автоматическая обработка отключена
-        if not self.config["auto_processing"]:
-            return
-            
-        # Проверяем, что API ключ указан
-        if not self.config["api_key"]:
-            return
-            
-        # Получаем объект сообщения
-        message = event.message
-        
-        # Проверяем упоминание бота
-        if self._me:
-            # Проверка текстового упоминания
-            if message.text:
-                # Проверяем упоминание по имени пользователя или имени бота
-                bot_username = self._me.username if self._me.username else ""
-                bot_firstname = self._me.first_name if self._me.first_name else ""
-                
-                mentioned = False
-                
-                # Проверка прямого упоминания через @username
-                if bot_username and f"@{bot_username}" in message.text.lower():
-                    mentioned = True
-                    
-                # Проверка упоминания по имени
-                if bot_firstname and bot_firstname.lower() in message.text.lower():
-                    mentioned = True
-                    
-                if not mentioned:
-                    # Проверяем, есть ли медиа контент, который мы должны обработать автоматически
-                    if not self.config["media_auto_process"]:
-                        return
-                        
-                    # Проверка наличия медиа в сообщении
-                    if not (message.media or getattr(message, "voice", None) or 
-                            getattr(message, "video", None) or getattr(message, "audio", None) or
-                            getattr(message, "photo", None) or getattr(message, "document", None) or
-                            getattr(message, "sticker", None) or getattr(message, "video_note", None)):
-                        return
-            else:
-                # Если нет текста, но есть медиа и настройка включена
-                if not self.config["media_auto_process"]:
-                    return
-                    
-                # Проверяем наличие медиа для автоматической обработки
-                if not (message.media or getattr(message, "voice", None) or 
-                        getattr(message, "video", None) or getattr(message, "audio", None) or
-                        getattr(message, "photo", None) or getattr(message, "document", None) or
-                        getattr(message, "sticker", None) or getattr(message, "video_note", None)):
-                    return
-                        
-        # Обрабатываем сообщение
-        await self._process_message(message)
-
-    async def _process_message(self, message):
-        """Обрабатывает сообщение и отправляет ответ от AI"""
-        try:
-            # Определяем тип медиа
-            mime_type = self._get_mime_type(message)
-            media_path = None
-            prompt = message.text if message.text else self.config["default_prompt"]
-            
-            # Специальное сообщение в зависимости от типа медиа
-            if mime_type:
-                if mime_type.startswith("audio"):
-                    status_msg = await message.reply(self.strings["audio_transcribing"])
-                elif mime_type.startswith("video"):
-                    status_msg = await message.reply(self.strings["video_analyzing"])
-                else:
-                    status_msg = await message.reply(self.strings["processing_media"])
-                    
-                # Скачиваем медиа
-                media_path = await message.download_media()
-                
-                # Если это изображение, попробуем открыть его
-                if mime_type.startswith("image"):
-                    try:
-                        img = Image.open(media_path)
-                    except Exception as e:
-                        await status_msg.edit(self.strings["empty_media"].format(e))
-                        if media_path and os.path.exists(media_path):
-                            with suppress(Exception):
-                                os.remove(media_path)
-                        return
-            else:
-                # Если нет медиа, просто отправляем запрос
-                status_msg = await message.reply(self.strings["request_sent"])
-                
-            # Формируем запрос к Gemini
-            content_parts = []
-            if prompt:
-                content_parts.append(genai.protos.Part(text=prompt))
-                
-            if media_path:
-                with open(media_path, "rb") as f:
-                    content_parts.append(genai.protos.Part(
-                        inline_data=genai.protos.Blob(
-                            mime_type=mime_type,
-                            data=f.read()
-                        )
-                    ))
-                    
-            if not content_parts:
-                await status_msg.edit(self.strings["empty_content"])
-                return
-                
-            # Кэширование запроса
-            cache_key = self._get_request_cache_key(prompt, media_path)
-            if cache_key in self._request_cache:
-                reply_text = self._request_cache[cache_key]
-                logger.info("Using cached response")
-            else:
-                # Отправляем запрос с учетом настройки потоковой передачи
-                reply_text = await self._process_gemini_query(content_parts, stream=self.config["gemini_stream"])
-                
-                # Кэшируем ответ (ограничиваем размер кэша)
-                if len(self._request_cache) > 50:
-                    # Удаляем старый элемент
-                    try:
-                        oldest_key = next(iter(self._request_cache))
-                        del self._request_cache[oldest_key]
-                    except (StopIteration, KeyError):
-                        pass
-                        
-                self._request_cache[cache_key] = reply_text
-                
-            random_emoji = await self._get_random_emoji()
-            
-            # Формируем ответ, включая исходный запрос при необходимости
-            if prompt != self.config["default_prompt"]:
-                response = f"{self.strings['question'].format(prompt)}\n\n{self.strings['gemini_response'].format(reply_text, random_emoji)}"
-            else:
-                response = f"\n{self.strings['gemini_response'].format(reply_text, random_emoji)}"
-                
-            # Отправляем ответ
-            await status_msg.edit(response)
-            
-        except Exception as e:
-            logger.exception(f"Error in _process_message: {e}")
-            try:
-                await message.reply(self.strings["error"].format(e))
-            except Exception:
-                pass
-        finally:
-            # Очистка временных файлов
-            if media_path and os.path.exists(media_path):
-                with suppress(Exception):
-                    os.remove(media_path)
-
-    def _get_mime_type(self, message) -> Optional[str]:
-        """Определяет MIME-тип медиа в сообщении"""
-        if not message:
-            return None
-
-        try:
-            if getattr(message, "video", None) or getattr(message, "video_note", None):
-                return "video/mp4"
-            elif getattr(message, "animation", None) or (getattr(message, "sticker", None) and getattr(message.sticker, "is_video", False)):
-                return "video/mp4"
-            elif getattr(message, "voice", None) or getattr(message, "audio", None):
-                return "audio/wav"
-            elif getattr(message, "photo", None):
-                return "image/png"
-            elif getattr(message, "sticker", None):
-                return "image/webp"
-            elif getattr(message, "document", None):
-                # Попытка определить тип по имени файла
-                file_name = getattr(message.document, "file_name", "").lower()
-                if file_name.endswith((".jpg", ".jpeg")):
-                    return "image/jpeg"
-                elif file_name.endswith(".png"):
-                    return "image/png"
-                elif file_name.endswith(".gif"):
-                    return "image/gif"
-                elif file_name.endswith((".mp4", ".avi", ".mov")):
-                    return "video/mp4"
-                elif file_name.endswith((".mp3", ".wav", ".ogg")):
-                    return "audio/mpeg"
-                # Дополнительные типы документов
-                elif file_name.endswith((".pdf")):
-                    return "application/pdf"
-                elif file_name.endswith((".doc", ".docx")):
-                    return "application/msword"
-                elif file_name.endswith((".xls", ".xlsx")):
-                    return "application/vnd.ms-excel"
-                elif file_name.endswith((".ppt", ".pptx")):
-                    return "application/vnd.ms-powerpoint"
-                # Если не смогли определить по расширению, пробуем по MIME типу
-                mime_type = getattr(message.document, "mime_type", None)
-                if mime_type:
-                    return mime_type
-                
-        except AttributeError as e:
-            logger.error(f"Error getting mime type: {e}")
-            return None
-
-        return None
-
-    async def _get_random_emoji(self) -> str:
-        """Возвращает случайный эмодзи из списка"""
+    def _get_random_emoji(self) -> str:
+        """Возвращает случайное эмодзи"""
         return random.choice(self.emojis)
 
-    async def _setup_gemini(self) -> genai.GenerativeModel:
-        """Настраивает Gemini API с заданным ключом и возвращает модель"""
+    async def _detect_mime_type(self, file_path: str) -> Optional[str]:
+        """Определяет MIME тип файла"""
+        try:
+            mime_type, _ = mimetypes.guess_type(file_path)
+            
+            if mime_type and mime_type in self._supported_mime_types:
+                return mime_type
+                
+            if mime_type and mime_type.startswith("image/"):
+                try:
+                    with Image.open(file_path) as img:
+                        format_map = {
+                            "JPEG": "image/jpeg",
+                            "PNG": "image/png", 
+                            "GIF": "image/gif",
+                            "WEBP": "image/webp",
+                            "BMP": "image/bmp",
+                            "TIFF": "image/tiff"
+                        }
+                        return format_map.get(img.format, "image/jpeg")
+                except Exception:
+                    pass
+                    
+            return mime_type if mime_type in self._supported_mime_types else None
+            
+        except Exception as e:
+            logger.error(f"Ошибка определения MIME типа: {e}")
+            return None
+
+    @retry_decorator()
+    async def _setup_gemini_model(self) -> genai.GenerativeModel:
+        """Настраивает и возвращает модель Gemini"""
         if not self.config["api_key"]:
             raise ValueError("API ключ не указан")
-        
-        # Настраиваем API с ключом
+            
         genai.configure(api_key=self.config["api_key"])
         
-        # Создаем модель с инструкцией и температурой
+        generation_config = genai.types.GenerationConfig(
+            temperature=self.config["temperature"],
+            max_output_tokens=8192,
+            response_mime_type="text/plain"
+        )
+        
         return genai.GenerativeModel(
             model_name=self.config["model_name"],
             system_instruction=self.config["system_instruction"] or None,
-            generation_config={"temperature": self.config["temperature"]}
+            generation_config=generation_config
         )
 
-    def _get_request_cache_key(self, prompt: str, media_path: Optional[str] = None) -> str:
-        """Создает уникальный ключ для кэширования запроса"""
-        key_components = [prompt]
-        
-        if media_path and os.path.exists(media_path):
-            # Добавляем хеш содержимого файла для медиа
-            try:
-                with open(media_path, "rb") as f:
-                    file_hash = hashlib.md5(f.read()).hexdigest()
-                key_components.append(file_hash)
-            except Exception as e:
-                logger.error(f"Error hashing media file: {e}")
-                # Если не удалось получить хеш, добавляем путь
-                key_components.append(media_path)
-        
-        return hashlib.md5(":".join(key_components).encode()).hexdigest()
-
     @retry_decorator()
-    async def _process_gemini_query(self, content_parts, stream=False):
-        """Обрабатывает запрос к Gemini API"""
-        model = await self._setup_gemini()
+    async def _process_gemini_request(self, content_parts: List) -> str:
+        """Обрабатывает запрос к Gemini"""
+        model = await self._setup_gemini_model()
         
-        if stream and self.config["gemini_stream"]:
-            # Потоковая генерация
-            response_stream = model.generate_content(content_parts, stream=True)
-            full_response = ""
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(model.generate_content, content_parts),
+                timeout=self.config["timeout"]
+            )
             
-            async for chunk in response_stream:
-                if chunk.text:
-                    full_response += chunk.text
-                    
-            return full_response.strip() or self.strings["empty_response"]
-        else:
-            # Обычная генерация
-            response = model.generate_content(content_parts)
-            return response.text.strip() if response.text else self.strings["empty_response"]
-
-    @retry_decorator(max_retries=3)
-    async def generate_image(self, prompt: str) -> Tuple[Optional[str], Union[float, str]]:
-        """Генерация изображения с API"""
-        start_time = time.time()
-
-        payload = {
-            "model": self.config["default_image_model"],
-            "prompt": prompt,
-            "response_format": "url"
-        }
-
-        http_proxy = self.config["proxy"] if self.config["proxy"] else None
-        conn = aiohttp.TCPConnector(ssl=False)
-        timeout = aiohttp.ClientTimeout(total=self.config["timeout"])
-        
-        headers = {
-            "Authorization": f"Bearer {self.config['api_key_image']}", 
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", 
-            "Content-Type": "application/json"
-        }
-
-        async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
-            async with session.post(
-                "https://api.kshteam.top/v1/images/generate", 
-                headers=headers, 
-                json=payload, 
-                proxy=http_proxy
-            ) as response:
-                generation_time = round(time.time() - start_time, 2)
+            if not response or not response.text:
+                return self.strings["empty_response"]
                 
-                if response.status == 200:
-                    data = await response.json()
-                    image_url = data.get("data", [{}])[0].get("url", None)
+            return response.text.strip()
+            
+        except asyncio.TimeoutError:
+            raise Exception(f"Таймаут запроса ({self.config['timeout']} сек)")
+        except Exception as e:
+            logger.error(f"Ошибка Gemini API: {e}")
+            raise
 
-                    if image_url:
-                        logger.info(f"Image generated successfully in {generation_time}s")
-                        return image_url, generation_time
-                    else:
-                        error_msg = "Ошибка получения URL изображения"
-                        logger.error(error_msg)
-                        return None, error_msg
-                else:
-                    error_msg = f"Ошибка сервера: {response.status}"
-                    logger.error(f"Server error: {response.status} - {await response.text()}")
-                    return None, error_msg
+    async def _process_media_file(self, file_path: str) -> tuple[Optional[str], Optional[str]]:
+        """Обрабатывает медиа файл для отправки в Gemini"""
+        try:
+            mime_type = await self._detect_mime_type(file_path)
+            
+            if not mime_type:
+                return None, "Неподдерживаемый тип файла"
+                
+            file_size = os.path.getsize(file_path)
+            max_size = 20 * 1024 * 1024  # 20 MB
+            
+            if file_size > max_size:
+                return None, f"Файл слишком большой ({file_size // 1024 // 1024} MB > 20 MB)"
+                
+            if mime_type.startswith("image/"):
+                try:
+                    with Image.open(file_path) as img:
+                        if img.width > 4096 or img.height > 4096:
+                            img.thumbnail((4096, 4096), Image.Resampling.LANCZOS)
+                            optimized_path = file_path + "_optimized"
+                            img.save(optimized_path, optimize=True, quality=85)
+                            file_path = optimized_path
+                except Exception as e:
+                    return None, f"Ошибка обработки изображения: {e}"
+                    
+            return file_path, mime_type
+            
+        except Exception as e:
+            logger.error(f"Ошибка обработки медиа: {e}")
+            return None, str(e)
 
     @loader.command(alias="gpt")
     async def gpt(self, message):
-        """— отправить запрос к Gemini AI"""
+        """Отправить запрос к Gemini AI"""
+        
         if not self.config["api_key"]:
             await utils.answer(message, self.strings["no_api_key"])
             return
-
+            
         prompt = utils.get_args_raw(message)
-        media_path = None
-        img = None
+        media_file = None
         show_question = True
-
+        
         try:
             if message.is_reply:
                 reply = await message.get_reply_message()
-                mime_type = self._get_mime_type(reply)
-
-                if mime_type:
-                    media_path = await reply.download_media()
-                    if not prompt:
-                        prompt = "Опиши это"
-                        await utils.answer(message, self.strings["describe_this"])
-                        show_question = False
+                
+                if reply.media:
+                    if reply.photo:
+                        status_msg = await utils.answer(message, self.strings["processing_media"])
+                    elif reply.video or reply.video_note or reply.animation:
+                        status_msg = await utils.answer(message, self.strings["processing_video"])
+                    elif reply.voice or reply.audio:
+                        status_msg = await utils.answer(message, self.strings["processing_audio"])
+                    else:
+                        status_msg = await utils.answer(message, self.strings["processing_media"])
+                    
+                    try:
+                        media_file = await reply.download_media()
+                        if not media_file:
+                            await utils.answer(status_msg, self.strings["media_error"].format("Не удалось скачать файл"))
+                            return
+                            
+                        # Обрабатываем медиа файл
+                        processed_file, mime_type = await self._process_media_file(media_file)
+                        if not processed_file:
+                            await utils.answer(status_msg, self.strings["media_error"].format(mime_type))
+                            return
+                            
+                        media_file = processed_file
+                        
+                        if not prompt:
+                            prompt = "Опиши детально что изображено на этом медиа"
+                            show_question = False
+                            
+                    except Exception as e:
+                        await utils.answer(status_msg, self.strings["media_error"].format(str(e)))
+                        return
                 else:
-                    prompt = prompt or reply.text
-
-            if media_path and mime_type and mime_type.startswith("image"):
-                try:
-                    img = Image.open(media_path)
-                except Exception as e:
-                    await utils.answer(message, self.strings["empty_media"].format(e))
-                    if media_path and os.path.exists(media_path):
-                        with suppress(Exception):
-                            os.remove(media_path)
-                    return
-
-            if not prompt and not img and not media_path:
-                await utils.answer(message, self.strings["no_prompt"])
-                return
-
-            await utils.answer(message, self.strings["request_sent"])
-
-            # Проверяем кэш для одинаковых запросов
-            cache_key = self._get_request_cache_key(prompt, media_path)
-            if cache_key in self._request_cache:
-                reply_text = self._request_cache[cache_key]
-                logger.info("Using cached response")
+                    if not prompt and reply.text:
+                        prompt = reply.text
+                    status_msg = await utils.answer(message, self.strings["processing"])
             else:
-                # Формируем части запроса для Gemini
-                content_parts = []
-                if prompt:
-                    content_parts.append(genai.protos.Part(text=prompt))
-
-                if media_path:
-                    with open(media_path, "rb") as f:
+                status_msg = await utils.answer(message, self.strings["processing"])
+            
+            if not prompt:
+                await utils.answer(status_msg, self.strings["no_prompt"])
+                return
+                
+            content_parts = [genai.protos.Part(text=prompt)]
+            
+            if media_file:
+                try:
+                    with open(media_file, "rb") as f:
                         content_parts.append(genai.protos.Part(
                             inline_data=genai.protos.Blob(
                                 mime_type=mime_type,
                                 data=f.read()
                             )
                         ))
-
-                if not content_parts:
-                    await utils.answer(message, self.strings["empty_content"])
+                except Exception as e:
+                    await utils.answer(status_msg, self.strings["media_error"].format(str(e)))
                     return
-
-                # Отправляем запрос с учетом настройки потоковой передачи
-                reply_text = await self._process_gemini_query(content_parts, stream=self.config["gemini_stream"])
-                
-                # Кэшируем ответ (ограничиваем размер кэша)
-                if len(self._request_cache) > 50:  # Ограничиваем кэш до 50 запросов
-                    # Удаляем старый элемент
-                    try:
-                        oldest_key = next(iter(self._request_cache))
-                        del self._request_cache[oldest_key]
-                    except (StopIteration, KeyError):
-                        pass
-                        
-                self._request_cache[cache_key] = reply_text
-
-            random_emoji = await self._get_random_emoji()
-
-            if show_question and prompt != "Опиши это":
-                response = f"{self.strings['question'].format(prompt)}\n\n{self.strings['gemini_response'].format(reply_text, random_emoji)}"
-            else:
-                response = f"\n{self.strings['gemini_response'].format(reply_text, random_emoji)}"
             
-            await utils.answer(message, response)
+            response_text = await self._process_gemini_request(content_parts)
+            
+            final_response = ""
+            
+            if show_question:
+                final_response += self.strings["question_header"].format(prompt)
+                
+            final_response += self.strings["response_header"] + response_text
+            
+            final_response += f" {self._get_random_emoji()}"
+                
+            await utils.answer(status_msg, final_response)
             
         except Exception as e:
-            logger.exception(f"Error in gemini command: {e}")
-            await utils.answer(message, self.strings["error"].format(e))
-        finally:
-            if media_path and os.path.exists(media_path):
-                with suppress(Exception):
-                    os.remove(media_path)
-
-    @loader.command()
-    async def gimg(self, message):
-        """— генерация изображения"""
-        prompt = utils.get_args_raw(message)
-        if not prompt:
-            await utils.answer(message, self.strings["no_image_prompt"])
-            return
-
-        await utils.answer(message, self.strings["generating_image"])
-
-        image_url, generation_time = await self.generate_image(prompt)
-
-        if image_url:
-            timeout = aiohttp.ClientTimeout(total=30)
-            conn = aiohttp.TCPConnector(ssl=False)
-            
+            logger.exception(f"Ошибка в команде gemini: {e}")
             try:
-                async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
-                    async with session.get(image_url) as img_response:
-                        if img_response.status != 200:
-                            await utils.answer(message, self.strings["error"].format(f"Не удалось загрузить изображение (код: {img_response.status})"))
-                            return
-                            
-                        img_content = io.BytesIO(await img_response.read())
-                        img_content.name = f"generated_image_{int(time.time())}.png"
-
-                        caption = self.strings["image_caption"].format(
-                            prompt=prompt,
-                            model=self.config['default_image_model'],
-                            time=generation_time
-                        )
-
-                        await utils.answer_file(message, img_content, caption=caption)
-
-            except Exception as e:
-                logger.exception(f"Error downloading generated image: {e}")
-                await utils.answer(message, self.strings["error"].format(f"Ошибка при загрузке изображения: {e}"))
-        else:
-            await utils.answer(message, self.strings["error"].format(generation_time))
-
-    @loader.command()
-    async def ghist(self, message):
-        """- анализ сообщений чата или пользователя (можно с ответом на сообщение)"""
-        if not self.config["api_key"]:
-            await utils.answer(message, self.strings["no_api_key"])
-            return
-
-        user = None
-        user_name = ""
-        history_limit = self.config["history_limit"]
-        
-        if message.is_reply:
-            reply = await message.get_reply_message()
-            user = reply.sender_id if reply.sender else None
-            user_name = reply.sender.first_name if reply.sender else "Пользователь"
-            if user:
-                await utils.answer(message, self.strings["collecting_history"].format(user_name))
-            else:
-                await utils.answer(message, self.strings["collecting_chat"])
-        else:
-            await utils.answer(message, self.strings["collecting_chat"])
-
-        try:
-            chat_id = message.chat_id
-            all_messages = []
-            
-            total_collected = 0
-            async for msg in self.client.iter_messages(chat_id, limit=history_limit * 2):  # Увеличиваем лимит для лучшего сбора
-                if msg and msg.sender and not getattr(msg.sender, "bot", False) and not msg.action:
-                    sender_id = msg.sender_id if hasattr(msg, "sender_id") else 0
-                    sender_name = msg.sender.first_name if hasattr(msg.sender, "first_name") else "Unknown"
+                error_message = self.strings["error"].format(str(e))
+                error_message += f" {self._get_random_emoji()}"
+                await utils.answer(message, error_message)
+            except:
+                pass
+        finally:
+            # Очищаем временные файлы
+            if media_file and os.path.exists(media_file):
+                with suppress(Exception):
+                    os.remove(media_file)
                     
-                    if user and sender_id != user:
-                        continue
-                        
-                    msg_text = msg.text if msg.text else ""
-                    if not msg_text and msg.media:
-                        msg_text = "[медиа]"
-                    
-                    # Пропускаем пустые сообщения
-                    if not msg_text:
-                        continue
-                    
-                    message_data = {
-                        "sender": sender_name,
-                        "time": msg.date.strftime("%H:%M:%S"),
-                        "text": msg_text
-                    }
-                    
-                    all_messages.append(message_data)
-                    total_collected += 1
-                    
-                if total_collected >= history_limit:
-                    break
-            
-            if not all_messages:
-                await utils.answer(message, self.strings["error"].format("Не найдено подходящих сообщений"))
-                return
-                
-            # Сортируем сообщения по времени
-            all_messages.sort(key=lambda x: x["time"])
-            
-            # Готовим контекст для анализа
-            context = "Ниже представлена история сообщений из чата Telegram. "
-            if user:
-                context += f"Проанализируй все сообщения пользователя {user_name} и составь краткую сводку о чем он писал сегодня, "
-                context += "его интересах, вопросах, общем настроении. Выдели основные темы обсуждения. "
-                context += "В конце напиши шутку про то что ты прочитал и запиши как 'Шутка от ИИ:'"
-                title = self.strings["user_analysis_title"].format(user_name)
-            else:
-                context += "Проанализируй все сообщения и составь краткую сводку о том, что обсуждалось в чате сегодня. "
-                context += "Выдели основные темы обсуждения, активных участников, общее настроение беседы. "
-                context += "В конце напиши шутку про то что ты прочитал и запиши как 'Шутка от ИИ:'"
-                title = self.strings["chat_analysis_title"]
-                
-            # Формируем текст истории для анализа
-            history_text = "\n".join([f"[{msg['time']}] {msg['sender']}: {msg['text']}" for msg in all_messages])
-            
-            prompt = f"{context}\n\nИстория сообщений:\n{history_text}"
-            
-            processing_msg = await utils.answer(
-                message, 
-                self.strings["processing"].format("Анализирую сообщения...")
-            )
-            
-            # Отправляем запрос к Gemini
-            content_parts = [genai.protos.Part(text=prompt)]
-            analysis = await self._process_gemini_query(content_parts)
-            
-            random_emoji = await self._get_random_emoji()
-            result = f"{title}\n\n{analysis} {random_emoji}"
-            
-            await utils.answer(processing_msg, result)
-            
-        except Exception as e:
-            logger.exception(f"Error in ghist: {e}")
-            await utils.answer(message, self.strings["error"].format(e))
-
-    @loader.command()
-    async def gmodels(self, message):
-        """— список доступных моделей Gemini"""
-        models = [
-            "gemini-1.5-flash", 
-            "gemini-1.5-pro", 
-            "gemini-1.5-flash-preview", 
-            "gemini-1.5-pro-preview",
-            "gemini-pro",
-            "gemini-pro-vision"
-        ]
-        
-        models_text = "\n".join([f"• <code>{model}</code>" for model in models])
-        await utils.answer(message, self.strings["gemini_models"].format(models_text, self.config["model_name"]))
-
-    @loader.command()
-    async def ghelp(self, message):
-        """— показать справку по модулю"""
-        await utils.answer(message, self.strings["help_text"])
-
-    @loader.command()
-    async def gauto(self, message):
-        """— включить/выключить автоматическую обработку сообщений"""
-        self.config["auto_processing"] = not self.config["auto_processing"]
-        
-        if self.config["auto_processing"]:
-            await utils.answer(message, self.strings["auto_processing_enabled"])
-        else:
-            await utils.answer(message, self.strings["auto_processing_disabled"])
+            # Очищаем оптимизированные файлы
+            optimized_file = str(media_file) + "_optimized" if media_file else None
+            if optimized_file and os.path.exists(optimized_file):
+                with suppress(Exception):
+                    os.remove(optimized_file)
