@@ -75,7 +75,7 @@ class SunshineGPT(loader.Module):
         "unsupported_media": "<emoji document_id=5872829476143894491>🚫</emoji> <b>Неподдерживаемый тип медиа</b>\n\n"
                             "Поддерживаются: изображения, видео, аудио, документы",
         "response_header": "<emoji document_id=5931415565955503486>🤖</emoji> <b>Ответ от Gemini:</b>\n\n",
-        "question_header": "<emoji document_id=5879585266426973039>🌐</emoji> <b>Вопрос:</b> {}\n",
+        "question_header": "<emoji document_id=5879585266426973039>🌐</emoji> <b>Вопрос:</b> {}\n\n",
     }
 
     def __init__(self):
