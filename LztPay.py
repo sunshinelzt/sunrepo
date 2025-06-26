@@ -89,14 +89,14 @@ class LztPayMod(loader.Module):
             "💭 <i>Перевод автоматически отменен</i>"
         ),
         
-        "module_info": (
-            "💸 <b>LztPay</b>\n\n"
-            "📋 <b>Возможности:</b>\n"
-            "• Переводы по никнейму, ID, Telegram\n"
-            "• Подтверждение операций\n"
-            "• Детальная обработка ошибок\n"
-            "• Гибкие настройки\n\n"
-            "⚙️ <i>Настройка:</i> <code>{prefix}cfg LztPay</code>"
+        #"module_info": (
+            #"💸 <b>LztPay</b>\n\n"
+            #"📋 <b>Возможности:</b>\n"
+            #"• Переводы по никнейму, ID, Telegram\n"
+            #"• Подтверждение операций\n"
+            #"• Детальная обработка ошибок\n"
+            #"• Гибкие настройки\n\n"
+            #"⚙️ <i>Настройка:</i> <code>{prefix}cfg LztPay</code>"
         ),
     }
     
@@ -196,12 +196,12 @@ class LztPayMod(loader.Module):
             logger.error(f"Ошибка при выполнении перевода: {e}")
             await utils.answer(message, self.strings("api_error").format(error=str(e)))
 
-    async def lztinfocmd(self, message):
-        """Информация о модуле LztPay"""
-        await utils.answer(
-            message,
-            self.strings("module_info").format(prefix=self.get_prefix())
-        )
+    #async def lztinfocmd(self, message):
+        #"""Информация о модуле LztPay"""
+        #await utils.answer(
+            #message,
+            #self.strings("module_info").format(prefix=self.get_prefix())
+         )
 
     # ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
     
@@ -218,7 +218,7 @@ class LztPayMod(loader.Module):
         return {
             "Authorization": f"Bearer {self.config['api_token']}",
             "Content-Type": "application/json",
-            "User-Agent": "LztPay-Hikka/2.0"
+            "User-Agent": "LztPay-Sunshine/2.0"
         }
     
     async def _find_user(self, user_input: str) -> Optional[Dict[str, Any]]:
