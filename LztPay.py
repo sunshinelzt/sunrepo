@@ -197,7 +197,7 @@ class LztPayMod(loader.Module):
             await utils.answer(message, self.strings("api_error").format(error=str(e)))
 
     async def lztinfocmd(self, message):
-        """ℹИнформация о модуле LztPay"""
+        """Информация о модуле LztPay"""
         await utils.answer(
             message,
             self.strings("module_info").format(prefix=self.get_prefix())
