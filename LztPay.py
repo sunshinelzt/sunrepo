@@ -185,7 +185,6 @@ class LztPayMod(loader.Module):
         except Exception as e:
             logger.error(f"Ошибка при выполнении перевода: {e}")
             await utils.answer(message, self.strings("api_error").format(error=str(e)))
-         )
 
     # ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
     
