@@ -3,7 +3,6 @@
 from .. import loader, utils
 import requests
 import asyncio
-import logging
 
 
 @loader.tds
@@ -16,15 +15,15 @@ class LztPayMod(loader.Module):
         # Ошибки и предупреждения
         "no_token": (
             "❌ <b>Токен не установлен</b>\n\n"
-            "💡 <i>Установите токен в конфигурации модуля</i>"
+            "💡 <i>Используй:</i> <code>.settoken &lt;токен&gt;</code>"
         ),
         "no_args": (
             "❌ <b>Неверные аргументы</b>\n\n"
-            "💡 <i>Пример:</i> <code>.pay Ceyser 100</code> или <code>.pay Ceyser 1,50 [коммент]</code>"
+            "💡 <i>Пример:</i> <code>.pay Ceyser 100 [коммент]</code>"
         ),
         "invalid_amount": (
             "❌ <b>Неверная сумма</b>\n\n"
-            "💡 <i>Сумма должна быть от 1 рубля (можно с копейками: 1,50)</i>"
+            "💡 <i>Сумма должна быть положительным числом</i>"
         ),
         "not_found": (
             "❌ <b>Пользователь не найден</b>\n\n"
@@ -34,14 +33,12 @@ class LztPayMod(loader.Module):
             "❌ <b>Ошибка перевода</b>\n\n"
             "📋 <b>Детали:</b>\n<code>{}</code>"
         ),
-        "api_error": (
-            "❌ <b>Ошибка API запроса</b>\n\n"
-            "🔗 <b>URL:</b> <code>{url}</code>\n"
-            "📊 <b>Статус:</b> <code>{status}</code>\n"
-            "📋 <b>Ошибка:</b> <code>{error}</code>"
-        ),
         
         # Успешные операции
+        "token_set": (
+            "✅ <b>Токен успешно установлен</b>\n\n"
+            "🔐 Теперь вы можете совершать переводы"
+        ),
         "success": (
             "✅ <b>Перевод выполнен успешно!</b>\n\n"
             "💰 <b>Сумма:</b> <code>{amount} {currency}</code>\n"
@@ -76,69 +73,93 @@ class LztPayMod(loader.Module):
             "⏰ <b>Время ожидания истекло</b>\n\n"
             "💭 <i>Перевод автоматически отменен</i>"
         ),
-        
-
-        
-        # Конфигурация
-        "cfg_doc_token": "API токен от LZT Market",
-        "cfg_doc_currency": "Валюта для переводов (RUB, USD, EUR)",
-        "cfg_doc_confirm": "Требовать подтверждение перед переводом",
-        "cfg_doc_timeout": "Время ожидания подтверждения (секунды)",
-        "cfg_doc_default_comment": "Комментарий по умолчанию для переводов",
     }
-
+    
     def __init__(self):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "api_token",
                 "",
-                lambda: self.strings("cfg_doc_token"),
+                "LZT Market API токен для переводов",
                 validator=loader.validators.Hidden()
             ),
             loader.ConfigValue(
-                "currency",
-                "RUB",
-                lambda: self.strings("cfg_doc_currency"),
-                validator=loader.validators.Choice(["RUB", "USD", "EUR"])
+                "api_url",
+                "https://prod-api.lzt.market/balance/transfer",
+                "URL API для переводов"
             ),
             loader.ConfigValue(
-                "require_confirmation",
-                True,
-                lambda: self.strings("cfg_doc_confirm"),
-                validator=loader.validators.Boolean()
+                "lookup_url",
+                "https://prod-api.lolz.live/users/find",
+                "URL API для поиска пользователей"
             ),
             loader.ConfigValue(
-                "confirmation_timeout",
-                300,
-                lambda: self.strings("cfg_doc_timeout"),
-                validator=loader.validators.Integer(minimum=30, maximum=600)
+                "profile_url",
+                "https://lolz.live/members/{}",
+                "URL профиля пользователя (с плейсхолдером {})"
             ),
             loader.ConfigValue(
                 "default_comment",
                 "Перевод через LztPay",
-                lambda: self.strings("cfg_doc_default_comment"),
-                validator=loader.validators.String()
+                "Комментарий по умолчанию для переводов"
+            ),
+            loader.ConfigValue(
+                "transfer_timeout",
+                300,
+                "Таймаут подтверждения перевода в секундах",
+                validator=loader.validators.Integer(minimum=10)
+            ),
+            loader.ConfigValue(
+                "currency",
+                "RUB",
+                "Валюта для переводов"
             ),
         )
         
-        # Константы API
-        self.api_url = "https://prod-api.lzt.market/balance/transfer"
-        self.lookup_url = "https://prod-api.lolz.live/users/find"
-        self.profile_url = "https://lolz.live/members/{}"
-        
-        # Состояние модуля
         self.pending_transfers = {}
-        self.logger = logging.getLogger(__name__)
 
-    async def client_ready(self, client, db):
-        """Инициализация после готовности клиента"""
-        self.client = client
-        self.db = db
+    @property
+    def api_url(self):
+        return self.config["api_url"]
+    
+    @property
+    def lookup_url(self):
+        return self.config["lookup_url"]
+    
+    @property
+    def profile_url(self):
+        return self.config["profile_url"]
+    
+    @property
+    def token(self):
+        return self.config["api_token"]
+    
+    @property
+    def default_comment(self):
+        return self.config["default_comment"]
+    
+    @property
+    def transfer_timeout(self):
+        return self.config["transfer_timeout"]
+    
+    @property
+    def currency(self):
+        return self.config["currency"]
+
+    async def settokencmd(self, message):
+        """Установить API токен: .settoken <токен>"""
+        args = utils.get_args(message)
+        if not args:
+            await utils.answer(message, self.strings("no_token"))
+            return
+        
+        self.config["api_token"] = args[0]
+        await utils.answer(message, self.strings("token_set"))
 
     async def paycmd(self, message):
         """Перевести деньги: .pay <ник/ID/@telegram> <amount> [комментарий]"""
         # Проверка токена
-        if not self.config["api_token"]:
+        if not self.token:
             await utils.answer(message, self.strings("no_token"))
             return
         
@@ -155,7 +176,12 @@ class LztPayMod(loader.Module):
             await utils.answer(message, self.strings("invalid_amount"))
             return
             
-        comment = " ".join(args[2:]) if len(args) > 2 else self.config["default_comment"]
+        comment = " ".join(args[2:]) if len(args) > 2 else self.default_comment
+        
+        # Базовая проверка пользователя
+        if user is None:
+            await utils.answer(message, self.strings("not_found"))
+            return
         
         # Показываем статус обработки
         await utils.answer(message, self.strings("processing"))
@@ -170,54 +196,38 @@ class LztPayMod(loader.Module):
             await utils.answer(message, self.strings("not_found"))
             return
         
-        # Форматирование имени пользователя
-        formatted_username = self._format_username(user_info['username'], user_info.get('user_id'))
+        # Создание данных для подтверждения
+        transfer_id = self._generate_transfer_id(message)
+        formatted_username = self._format_username(user_info['username'], user_info['user_id'])
         
-        # Проверка необходимости подтверждения
-        if self.config["require_confirmation"]:
-            # Создание данных для подтверждения
-            transfer_id = self._generate_transfer_id(message)
-            
-            self.pending_transfers[transfer_id] = {
-                'payload': payload,
-                'headers': headers,
-                'amount': amount,
-                'username': formatted_username,
-                'comment': comment,
-                'user_id': user_info.get('user_id'),
-                'message': message
-            }
-            
-            # Показываем форму подтверждения
-            await self._show_confirmation_form(message, transfer_id, amount, formatted_username, comment)
-            
-            # Автоматическая очистка через таймаут
-            asyncio.create_task(self._cleanup_transfer(transfer_id, self.config["confirmation_timeout"]))
-        else:
-            # Выполняем перевод без подтверждения
-            await self._execute_transfer(message, payload, headers, amount, formatted_username, comment)
-
-
+        self.pending_transfers[transfer_id] = {
+            'payload': payload,
+            'headers': headers,
+            'amount': amount,
+            'username': formatted_username,
+            'comment': comment,
+            'user_id': user_info['user_id'],
+            'message': message
+        }
+        
+        # Показываем форму подтверждения
+        await self._show_confirmation_form(message, transfer_id, amount, formatted_username, comment)
+        
+        # Автоматическая очистка через таймаут
+        asyncio.create_task(self._cleanup_transfer(transfer_id, self.transfer_timeout))
 
     def _parse_amount(self, amount_str):
-        """Парсинг суммы с валидацией (поддержка копеек через запятую)"""
+        """Парсинг суммы с валидацией"""
         try:
-            # Заменяем запятую на точку для парсинга
-            amount_str = amount_str.replace(',', '.')
-            amount = float(amount_str)
-            
-            # Проверяем что сумма больше 0 и минимум 1 рубль
-            if amount >= 1.0:
-                return amount
-            else:
-                return None
+            amount = int(amount_str)
+            return amount if amount > 0 else None
         except ValueError:
             return None
 
     def _get_headers(self):
         """Создание заголовков для API запросов"""
         return {
-            "Authorization": f"Bearer {self.config['api_token']}",
+            "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json"
         }
 
@@ -226,7 +236,7 @@ class LztPayMod(loader.Module):
         return {
             "amount": amount,
             "comment": comment,
-            "currency": self.config["currency"]
+            "currency": self.currency
         }
 
     async def _resolve_user(self, user, headers, payload):
@@ -290,13 +300,13 @@ class LztPayMod(loader.Module):
 
     def _generate_transfer_id(self, message):
         """Генерация уникального ID для перевода"""
-        return f"{message.chat.id}_{message.id}_{message.date.timestamp()}"
+        return f"{message.chat.id}_{message.id}"
 
     async def _show_confirmation_form(self, message, transfer_id, amount, username, comment):
         """Показ формы подтверждения перевода"""
         confirm_text = self.strings("confirm").format(
             amount=amount,
-            currency=self.config["currency"],
+            currency=self.currency,
             username=username,
             comment=comment
         )
@@ -319,37 +329,6 @@ class LztPayMod(loader.Module):
                 ]
             ]
         )
-
-    async def _execute_transfer(self, message, payload, headers, amount, username, comment):
-        """Выполнение перевода"""
-        await utils.answer(message, self.strings("executing_transfer"))
-        
-        try:
-            # Выполнение API запроса
-            response = requests.post(
-                self.api_url, 
-                json=payload, 
-                headers=headers
-            )
-            data = response.json()
-            
-            if response.status_code == 200:
-                # Успешный перевод
-                success_message = self.strings("success").format(
-                    amount=amount,
-                    currency=self.config["currency"],
-                    username=username,
-                    comment=comment
-                )
-                await utils.answer(message, success_message)
-            else:
-                # Ошибка API
-                error_text = data.get("errors", data.get("message", str(data)))
-                await utils.answer(message, self.strings("fail").format(error_text))
-                
-        except Exception as e:
-            # Системная ошибка
-            await utils.answer(message, self.strings("fail").format(str(e)))
 
     async def _cleanup_transfer(self, transfer_id, timeout):
         """Автоматическая очистка данных о переводе через таймаут"""
@@ -381,7 +360,7 @@ class LztPayMod(loader.Module):
                 # Успешный перевод
                 success_message = self.strings("success").format(
                     amount=transfer_data['amount'],
-                    currency=self.config["currency"],
+                    currency=self.currency,
                     username=transfer_data['username'],
                     comment=transfer_data['comment']
                 )
