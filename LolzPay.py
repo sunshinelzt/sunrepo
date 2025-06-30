@@ -54,7 +54,7 @@ class RateLimitError(APIError):
 
 @loader.tds
 class LolzPayMod(loader.Module):
-    """💰 Переводы денег через Lolzteam API с улучшенным интерфейсом"""
+    """💰 Переводы денег через Lolzteam API"""
 
     strings = {
         "name": "LolzPay",
