@@ -204,7 +204,7 @@ class SunshineGPT(loader.Module):
         "media_error": "<emoji document_id=5877332341331857066>📁</emoji> <b>Ошибка обработки медиа:</b> <code>{}</code>",
         "unsupported_media": "<emoji document_id=5872829476143894491>🚫</emoji> <b>Неподдерживаемый тип медиа</b>\n\n"
                             "Поддерживаются: изображения, видео, аудио, документы",
-        "response_header": "<emoji document_id=5931415565955503486>🤖</emoji> <b>Ответ от Gemini:</b>\n\n",
+        "response_header": "<emoji document_id=5931415565955503486>🤖</emoji> <b>Ответ от Gemini:</b> ",
         "question_header": "<emoji document_id=5879585266426973039>🌐</emoji> <b>Вопрос:</b> <code>{}</code>\n\n",
         "download_failed": "<emoji document_id=5778527486270770928>❌</emoji> <b>Не удалось скачать медиа файл</b>",
     }
