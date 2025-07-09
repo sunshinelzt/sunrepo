@@ -288,7 +288,7 @@ class YtbAudioModule(loader.Module):
                         # Создаем красивую подпись
                         caption = (
                             f"<emoji document_id=5891249688933305846>🎵</emoji> <b>{title}</b>\n"
-                            f"<emoji document_id=5879770735999717115>👤</emoji> <i>{author}</i>\n"
+                            f"<emoji document_id=5879770735999717115>👤</emoji> <i>{author}</i>\n\n"
                             f"<emoji document_id=5877465816030515018>🔗</emoji> <a href='{youtube_url}'>Открыть в YouTube</a>"
                         )
                         
