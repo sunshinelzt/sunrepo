@@ -209,7 +209,7 @@ class YtbAudioModule(loader.Module):
                 except Exception as e:
                     self.logger.debug(f"Could not delete message: {str(e)}")
                     
-            self.logger.info(f"Deleted {deleted_count} messages from bot chat")
+            #self.logger.info(f"Deleted {deleted_count} messages from bot chat")
             
         except Exception as e:
             self.logger.error(f"Error cleaning bot chat: {str(e)}")
@@ -336,11 +336,11 @@ class YtbAudioModule(loader.Module):
 
     async def client_ready(self, client, db):
         """Вызывается при готовности клиента"""
-        self.logger.info(f"YtbAudio module loaded successfully")
+        #self.logger.info(f"YtbAudio module loaded successfully")
         
         # Проверяем доступность бота
         try:
             await client.get_entity(self.bot_username)
-            self.logger.info(f"Bot {self.bot_username} is accessible")
+            #self.logger.info(f"Bot {self.bot_username} is accessible")
         except Exception as e:
             self.logger.warning(f"Bot {self.bot_username} might not be accessible: {str(e)}")
