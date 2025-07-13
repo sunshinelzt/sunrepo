@@ -198,8 +198,8 @@ class LolzPayMod(loader.Module):
             ),
         )
         
-        self._api_base = "https://prod-api.lzt.market"
-        self._forum_api = "https://prod-api.lolz.live"
+        self._api_base = "https://api.lzt.market"
+        self._forum_api = "https://api.lolz.live"
         self._session: Optional[aiohttp.ClientSession] = None
         self._last_request = 0.0
         self._rate_limit_delay = 0.5
