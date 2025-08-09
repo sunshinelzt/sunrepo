@@ -45,7 +45,7 @@ class KeeperMod(loader.Module):
     
     strings = {
         "name": "Keeper",
-        "saved": "<emoji document_id=6046410905829251121>💥</emoji> <b>Спиздил {media_type}</b>\n",
+        "saved": "<emoji document_id=6046410905829251121>💥</emoji> <b>Спиздил {media_type}</b>",
         "auto_on": "<emoji document_id=6044327262575141199>🌟</emoji> Автосохранение <b>включено</b>.",
         "auto_off": "<emoji document_id=6044327262575141199>🌟</emoji> Автосохранение <b>выключено</b>.",
         "from": "От",
