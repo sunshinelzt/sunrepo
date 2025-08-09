@@ -342,7 +342,7 @@ class KeeperMod(loader.Module):
             _, media_type = self.get_extension_and_type(message)
             
             media_name = self.strings["media_types"].get(media_type, self.strings["media_types"]["media"])
-            caption = self.strings["saved"].format(media_type=media_name).rstrip('\n')
+            caption = self.strings["saved"].format(media_type=media_name).rstrip('\n') + "\n"
             
             sender = message.sender
             if sender and hasattr(sender, 'id'):
