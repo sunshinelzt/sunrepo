@@ -145,11 +145,7 @@ class TonDonate(loader.Module):
         if any(url_lower.endswith(ext) for ext in video_extensions):
             return "video"
             
-        # GIF анимации
-        if url_lower.endswith('.gif'):
-            return "animation"
-            
-        # По умолчанию фото
+        # GIF и другие изображения - всё как photo
         return "photo"
 
     def _create_payment_url(self, wallet: str, amount: float, comment: Optional[str] = None) -> str:
@@ -195,23 +191,25 @@ class TonDonate(loader.Module):
             try:
                 if self._validate_url(banner_url):
                     media_type = self._detect_media_type(banner_url)
-                    form_params[media_type] = banner_url
                     
-                    # Пытаемся отправить с баннером
-                    await self.inline.form(**form_params)
-                    return
+                    # Поддерживаются только photo и video
+                    if media_type in ["photo", "video"]:
+                        form_params[media_type] = banner_url
+                        
+                        # Пытаемся отправить с баннером
+                        await self.inline.form(**form_params)
+                        return
+                    else:
+                        logger.warning(f"Неподдерживаемый тип медиа: {media_type}")
                 else:
                     logger.warning(f"Невалидный URL баннера: {banner_url}")
                     
             except Exception as e:
                 logger.error(f"Ошибка при загрузке баннера {banner_url}: {e}")
                 
-                # Показываем предупреждение о проблеме с баннером
-                try:
-                    await utils.answer(message, self.strings["banner_loading_error"])
-                    await asyncio.sleep(1)
-                except Exception:
-                    pass
+                # Убираем медиа параметры при ошибке
+                for media_key in ["photo", "video"]:
+                    form_params.pop(media_key, None)
         
         # Отправляем без баннера
         await self.inline.form(**form_params)
