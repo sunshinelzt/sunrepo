@@ -51,7 +51,7 @@ class TonDonate(loader.Module):
             loader.ConfigValue(
                 "default_banner_url", 
                 "", 
-                "Ссылка на баннер(опционально)"
+                "Ссылка на баннер по умолчанию (опционально)"
             ),
 
             loader.ConfigValue(
@@ -95,6 +95,8 @@ class TonDonate(loader.Module):
                     result["amount"] = part
                 elif i == 2:
                     result["comment"] = part
+                elif i == 3:
+                    result["banner_url"] = part
         else:
             result["amount"] = args_raw.strip()
             
@@ -131,6 +133,21 @@ class TonDonate(loader.Module):
             return round(amount, 9)
         except (ValueError, TypeError):
             return None
+
+    def _validate_url(self, url: str) -> bool:
+        """Валидация URL"""
+        if not url:
+            return False
+            
+        url_pattern = re.compile(
+            r'^https?://'
+            r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'
+            r'localhost|'
+            r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+            r'(?::\d+)?'
+            r'(?:/?|[/?]\S+)$', re.IGNORECASE
+        )
+        return bool(url_pattern.match(url))
 
     def _create_payment_url(self, wallet: str, amount: float, comment: Optional[str] = None) -> str:
         """Создание URL для платежа с улучшенным форматированием"""
@@ -170,7 +187,7 @@ class TonDonate(loader.Module):
 
     @loader.command()
     async def dton(self, message):
-        """Создать платежную ссылку TON - [текст] | сумма | [комментарий] | [баннер]"""
+        """Создать платежную ссылку TON - [текст] | сумма | [комментарий]"""
         args_raw = utils.get_args_raw(message)
         wallet = self.config["wallet_address"]
         
