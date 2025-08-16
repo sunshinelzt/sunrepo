@@ -502,13 +502,43 @@ class s_checks(loader.Module):
             return
 
         logs_id = self.config["logs_id"]
+        
         if logs_id == "me":
-            await self._client.send_message("me", message, link_preview=False)
-        else:
             try:
-                await self._client.send_message(logs_id, message, link_preview=False)
-            except Exception:
                 await self._client.send_message("me", message, link_preview=False)
+            except Exception as e:
+                print(f"Ошибка отправки в избранное: {e}")
+            return
+
+        try:
+            if isinstance(logs_id, str):
+                if logs_id.lstrip('-').isdigit():
+                    logs_id = int(logs_id)
+                else:
+                    pass
+            
+            await self._client.send_message(logs_id, message, link_preview=False)
+            
+        except ValueError as e:
+            try:
+                error_msg = f"<emoji document_id=5778527486270770928>❌</emoji> <b>Неправильный формат ID канала:</b> <code>{logs_id}</code>\n\n{message}"
+                await self._client.send_message("me", error_msg, link_preview=False)
+            except Exception:
+                print(f"Критическая ошибка: неправильный ID {logs_id}")
+                
+        except Exception as e:
+            try:
+                error_msg = f"<emoji document_id=5778527486270770928>❌</emoji> <b>Ошибка отправки логов в канал/чат {logs_id}:</b>\n<code>{str(e)}</code>\n\n<b>Возможные причины:</b>\n"
+                error_msg += "• Бот не добавлен в канал\n"
+                error_msg += "• Нет прав на отправку сообщений\n" 
+                error_msg += "• Неправильный ID канала\n"
+                error_msg += "• Канал/чат не существует\n\n"
+                error_msg += f"<b>Исходное сообщение:</b>\n{message}"
+                
+                await self._client.send_message("me", error_msg, link_preview=False)
+            except Exception:
+                print(f"Критическая ошибка отправки логов: {e}")
+                print(f"Сообщение лога: {message}")
 
     async def send_log_message(self, message, code):
         """Отправка информации о найденном чеке"""
@@ -548,7 +578,6 @@ class s_checks(loader.Module):
     def _get_random_emoji(self, emoji_type):
         """Получение случайного эмодзи"""
         return random.choice(self._emojis.get(emoji_type, ["🔥"]))
-
 
     @loader.command()
     async def checkscmd(self, message: Message):
