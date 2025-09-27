@@ -129,6 +129,7 @@ class s_checks(loader.Module):
         "blocked_chats_desc": "ID чатов/каналов где чеки НЕ будут активироваться",
         "gemini_api_key_desc": "API ключ для Gemini AI (aistudio.google.com/apikey)",
         "gemini_model_name_desc": "модель для Gemini AI. Доступные: gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.0-flash, gemini-1.5-flash",
+        "queue_delay_desc": "задержка между отправкой логов в секундах",
         "check_found": "Обнаружен новый чек",
         "check_link": "Ссылка чека:",
         "found_in_private": "Обнаружен в личке:",
@@ -214,6 +215,12 @@ class s_checks(loader.Module):
                 doc=lambda: self.strings("gemini_model_name_desc"),
                 validator=loader.validators.String(),
             ),
+            loader.ConfigValue(
+                "queue_delay",
+                2,
+                doc=lambda: self.strings("queue_delay_desc"),
+                validator=loader.validators.Integer(minimum=1),
+            ),
         )
         self.sent_codes = defaultdict(bool)
         self._emojis = {
@@ -280,6 +287,8 @@ class s_checks(loader.Module):
         }
         self._module_loaded = False
         self._handlers = []
+        self._queue = []
+        self._queue_running = False
 
     async def client_ready(self):
         """Инициализация модуля"""
@@ -288,6 +297,11 @@ class s_checks(loader.Module):
         self.me_id = self.me.id
         self.cd_id = 1559501630
         self.extractor = URLExtract()
+        
+        # Инициализация очереди
+        self._queue = []
+        self._queue_running = True
+        asyncio.create_task(self._queue_processor())
         
         handlers_config = [
             (self.cb_handler, [events.NewMessage, events.MessageEdited]),
@@ -304,10 +318,30 @@ class s_checks(loader.Module):
             self.passworder = Passworder(self.config["gemini_api_key"], self.config["gemini_model_name"])
         else:
             self.passworder = None
+
+    async def _queue_processor(self):
+        """Обработчик очереди сообщений"""
+        while self._queue_running:
+            try:
+                if self._queue:
+                    # Берем первый элемент из очереди
+                    coroutine = self._queue.pop(0)
+                    # Выполняем корутину
+                    await coroutine
+                    # Устанавливаем задержку перед следующей отправкой
+                    await asyncio.sleep(self.config["queue_delay"])
+                else:
+                    # Если очередь пуста, ждем немного
+                    await asyncio.sleep(0.5)
+            except Exception as e:
+                # В случае ошибки продолжаем работу
+                print(f"Ошибка в обработчике очереди: {e}")
+                await asyncio.sleep(1)
     
     async def on_unload(self):
         """Выгрузка модуля"""
         self._module_loaded = False
+        self._queue_running = False
         
         if hasattr(self, '_handlers') and self._handlers:
             for handler in self._handlers:
@@ -322,6 +356,9 @@ class s_checks(loader.Module):
         
         if hasattr(self, 'passworder'):
             self.passworder = None
+        
+        if hasattr(self, '_queue'):
+            self._queue.clear()
         
         for attr in ['me', 'me_id', 'cd_id', 'extractor']:
             if hasattr(self, attr):
@@ -496,33 +533,76 @@ class s_checks(loader.Module):
             if password:
                 await self._client.send_message(self.cd_id, password)
 
+    async def _add_to_queue(self, entity_id, text):
+        """Добавление сообщения в очередь"""
+        if not hasattr(self, 'inline') or not self.inline:
+            return
+        
+        try:
+            # Очищаем текст через sanitise_text
+            sanitized_text = self.inline.sanitise_text(text)
+            
+            # Создаем корутину для отправки сообщения
+            coroutine = self.inline.bot.send_message(
+                chat_id=entity_id,
+                text=sanitized_text,
+                disable_web_page_preview=True,
+                parse_mode='HTML'
+            )
+            
+            # Добавляем корутину в очередь (НЕ выполняем сразу)
+            self._queue.append(coroutine)
+            
+        except Exception as e:
+            # Fallback на обычную отправку через клиент
+            try:
+                if entity_id == "me":
+                    await self._client.send_message("me", text, link_preview=False)
+                else:
+                    await self._client.send_message(entity_id, text, link_preview=False)
+            except Exception:
+                print(f"Критическая ошибка отправки сообщения: {e}")
+
     async def log(self, message):
-        """Отправка логов"""
+        """Отправка логов через систему очереди"""
         if not self.config["logs_enabled"]:
             return
 
         logs_id = self.config["logs_id"]
         
+        # Для "me" используем специальный ID если есть inline бот
         if logs_id == "me":
-            try:
-                await self._client.send_message("me", message, link_preview=False)
-            except Exception as e:
-                print(f"Ошибка отправки в избранное: {e}")
-            return
+            if hasattr(self, 'inline') and self.inline and hasattr(self.inline, 'bot'):
+                # Получаем ID текущего пользователя для inline бота
+                try:
+                    me_info = await self._client.get_me()
+                    logs_id = me_info.id
+                except Exception:
+                    # Fallback на обычную отправку
+                    try:
+                        await self._client.send_message("me", message, link_preview=False)
+                    except Exception as e:
+                        print(f"Ошибка отправки в избранное: {e}")
+                    return
+            else:
+                # Fallback на обычную отправку
+                try:
+                    await self._client.send_message("me", message, link_preview=False)
+                except Exception as e:
+                    print(f"Ошибка отправки в избранное: {e}")
+                return
 
         try:
-            if isinstance(logs_id, str):
-                if logs_id.lstrip('-').isdigit():
-                    logs_id = int(logs_id)
-                else:
-                    pass
+            if isinstance(logs_id, str) and logs_id.lstrip('-').isdigit():
+                logs_id = int(logs_id)
             
-            await self._client.send_message(logs_id, message, link_preview=False)
+            # Добавляем в очередь вместо немедленной отправки
+            await self._add_to_queue(logs_id, message)
             
-        except ValueError as e:
+        except ValueError:
             try:
                 error_msg = f"<emoji document_id=5778527486270770928>❌</emoji> <b>Неправильный формат ID канала:</b> <code>{logs_id}</code>\n\n{message}"
-                await self._client.send_message("me", error_msg, link_preview=False)
+                await self._add_to_queue("me", error_msg)
             except Exception:
                 print(f"Критическая ошибка: неправильный ID {logs_id}")
                 
@@ -535,7 +615,7 @@ class s_checks(loader.Module):
                 error_msg += "• Канал/чат не существует\n\n"
                 error_msg += f"<b>Исходное сообщение:</b>\n{message}"
                 
-                await self._client.send_message("me", error_msg, link_preview=False)
+                await self._add_to_queue("me", error_msg)
             except Exception:
                 print(f"Критическая ошибка отправки логов: {e}")
                 print(f"Сообщение лога: {message}")
@@ -638,3 +718,35 @@ class s_checks(loader.Module):
         emoji = self._get_random_emoji("check")
         
         await utils.answer(message, self.strings["auto_unsubscription"].format(emoji, status))
+
+    @loader.command()
+    async def queuestatscmd(self, message: Message):
+        """Статистика очереди логов"""
+        if not hasattr(self, '_queue'):
+            await utils.answer(message, "<b>❌ Очередь не инициализирована</b>")
+            return
+            
+        queue_size = len(self._queue)
+        queue_status = "работает" if getattr(self, '_queue_running', False) else "остановлена"
+        delay = self.config.get("queue_delay", 2)
+        
+        stats_text = f"""<b>📊 Статистика очереди логов:</b>
+
+<b>📋 Сообщений в очереди:</b> <code>{queue_size}</code>
+<b>⚡️ Статус обработчика:</b> <code>{queue_status}</code>
+<b>⏱ Задержка между отправками:</b> <code>{delay}с</code>
+<b>🔄 Logs enabled:</b> <code>{self.config['logs_enabled']}</code>"""
+
+        await utils.answer(message, stats_text)
+
+    @loader.command()
+    async def clearqueuecmd(self, message: Message):
+        """Очистить очередь логов"""
+        if not hasattr(self, '_queue'):
+            await utils.answer(message, "<b>❌ Очередь не инициализирована</b>")
+            return
+            
+        cleared_count = len(self._queue)
+        self._queue.clear()
+        
+        await utils.answer(message, f"<b>🗑 Очередь очищена!</b>\n<b>Удалено сообщений:</b> <code>{cleared_count}</code>")
