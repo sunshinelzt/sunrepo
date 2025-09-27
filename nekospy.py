@@ -14,6 +14,7 @@ from telethon.tl.types import (
     DocumentAttributeFilename,
     Message,
     PeerChat,
+    PeerUser,
     UpdateDeleteChannelMessages,
     UpdateDeleteMessages,
     UpdateEditChannelMessage,
@@ -68,7 +69,7 @@ class NekoSpy(loader.Module):
         "on": "включен",
         "off": "выключен",
         "cfg_enable_pm": "Включить режим шпиона в личных сообщениях",
-        "cfg_enable_groups": "Включить режим шпиона в группах",
+        "cfg_enable_groups": "Включить режим шпиона в группах и супергруппах",
         "cfg_whitelist": "Список чатов, от которых нужно сохранять сообщения",
         "cfg_blacklist": "Список чатов, от которых нужно игнорировать сообщения",
         "cfg_always_track": (
@@ -432,6 +433,7 @@ class NekoSpy(loader.Module):
                 or (
                     self.config["log_edits"]
                     and self.config["enable_groups"]
+                    and not isinstance(cached_message.peer_id, PeerUser)  # Все кроме ЛС
                     and utils.get_chat_id(update.message) not in self.blacklist
                     and (
                         not self.whitelist
@@ -441,7 +443,7 @@ class NekoSpy(loader.Module):
             )
 
             if (should_log and 
-                not cached_message.sender.bot and 
+                not getattr(cached_message.sender, 'bot', False) and 
                 hasattr(update.message, 'raw_text') and 
                 hasattr(cached_message, 'raw_text') and
                 update.message.raw_text != cached_message.raw_text):
@@ -481,8 +483,8 @@ class NekoSpy(loader.Module):
                 return
 
             # Проверяем условия для логирования
-            is_pm = not isinstance(cached_message.peer_id, PeerChat)
-            is_group = isinstance(cached_message.peer_id, PeerChat)
+            is_pm = isinstance(cached_message.peer_id, PeerUser)
+            is_group = not is_pm  # Все что не ЛС = группы/супергруппы/каналы
             
             should_log = (
                 cached_message.sender_id in self.always_track
@@ -500,13 +502,17 @@ class NekoSpy(loader.Module):
                 update.message.raw_text != cached_message.raw_text):
                 
                 sender = await self._client.get_entity(cached_message.sender_id, exp=0)
-                if sender.bot:
+                if getattr(sender, 'bot', False):
                     return
 
                 message_url = self._get_message_url(cached_message)
                 
                 if is_group:
-                    chat = await self._client.get_entity(cached_message.peer_id.chat_id, exp=0)
+                    try:
+                        chat = await self._client.get_entity(cached_message.peer_id.chat_id, exp=0)
+                    except:
+                        # Для супергрупп используем channel_id
+                        chat = await self._client.get_entity(getattr(cached_message.peer_id, 'channel_id', cached_message.peer_id.chat_id), exp=0)
                     content = self.strings("edited_chat").format(
                         utils.get_entity_url(chat),
                         self._format_user_name(chat),
@@ -542,8 +548,8 @@ class NekoSpy(loader.Module):
                     continue
 
                 # Проверяем условия для логирования
-                is_pm = not isinstance(cached_message.peer_id, PeerChat)
-                is_group = isinstance(cached_message.peer_id, PeerChat)
+                is_pm = isinstance(cached_message.peer_id, PeerUser)
+                is_group = not is_pm  # Все что не ЛС = группы/супергруппы/каналы
                 
                 should_log = (
                     cached_message.sender_id in self.always_track
@@ -551,7 +557,8 @@ class NekoSpy(loader.Module):
                     or (
                         self._should_capture(cached_message.sender_id, utils.get_chat_id(cached_message))
                         and not (self.config["ignore_inline"] and cached_message.via_bot_id)
-                        and ((self.config["enable_pm"] and is_pm) or (self.config["enable_groups"] and is_group))
+                        and ((self.config["enable_pm"] and is_pm) or 
+                             (self.config["enable_groups"] and is_group))
                     )
                 )
 
@@ -559,13 +566,17 @@ class NekoSpy(loader.Module):
                     continue
 
                 sender = await self._client.get_entity(cached_message.sender_id, exp=0)
-                if sender.bot:
+                if getattr(sender, 'bot', False):
                     continue
 
                 message_url = self._get_message_url(cached_message)
                 
                 if is_group:
-                    chat = await self._client.get_entity(cached_message.peer_id.chat_id, exp=0)
+                    try:
+                        chat = await self._client.get_entity(cached_message.peer_id.chat_id, exp=0)
+                    except:
+                        # Для супергрупп используем channel_id
+                        chat = await self._client.get_entity(getattr(cached_message.peer_id, 'channel_id', cached_message.peer_id.chat_id), exp=0)
                     content = self.strings("deleted_chat").format(
                         utils.get_entity_url(chat),
                         self._format_user_name(chat),
@@ -605,9 +616,10 @@ class NekoSpy(loader.Module):
                     or utils.get_chat_id(cached_message) in self.always_track
                     or (
                         self.config["enable_groups"]
+                        and not isinstance(cached_message.peer_id, PeerUser)  # Все кроме ЛС
                         and self._should_capture(cached_message.sender_id, utils.get_chat_id(cached_message))
                         and not (self.config["ignore_inline"] and cached_message.via_bot_id)
-                        and not cached_message.sender.bot
+                        and not getattr(cached_message.sender, 'bot', False)
                     )
                 )
 
