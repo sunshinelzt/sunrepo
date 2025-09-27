@@ -1,4 +1,4 @@
-__version__ = (1, 1, 0)
+__version__ = (1, 1, 1)
 
 # meta developer: @sunshinelzt
 # scope: heroku_only
@@ -13,11 +13,8 @@ import typing
 from telethon.tl.types import (
     DocumentAttributeFilename,
     Message,
-    PeerChat,
     PeerUser,
-    UpdateDeleteChannelMessages,
     UpdateDeleteMessages,
-    UpdateEditChannelMessage,
     UpdateEditMessage,
 )
 from telethon.utils import get_display_name
@@ -29,75 +26,49 @@ logger = logging.getLogger(__name__)
 
 @loader.tds
 class NekoSpy(loader.Module):
-    """Отправляет удаленные и/или отредактированные сообщения от выбранных пользователей"""
+    """Отправляет удаленные и/или отредактированные сообщения из личных сообщений"""
 
     rei = "<emoji document_id=5409143295039252230>👩‍🎤</emoji>"
-    groups = "<emoji document_id=6037355667365300960>👥</emoji>"
     pm = "<emoji document_id=6048540195995782913>👤</emoji>"
 
     strings = {
         "name": "NekoSpy",
-        "state": f"{rei} <b>Режим слежения теперь {{}}</b>",
-        "spybl": f"{rei} <b>Текущий чат добавлен в черный список для слежения</b>",
-        "spybl_removed": f"{rei} <b>Текущий чат удален из черного списка для слежения</b>",
+        "state": f"{rei} <b>Режим слежения в ЛС теперь {{}}</b>",
+        "spybl": f"{rei} <b>Пользователь добавлен в черный список для слежения</b>",
+        "spybl_removed": f"{rei} <b>Пользователь удален из черного списка для слежения</b>",
         "spybl_clear": f"{rei} <b>Черный список для слежения очищен</b>",
-        "spywl": f"{rei} <b>Текущий чат добавлен в белый список для слежения</b>",
-        "spywl_removed": f"{rei} <b>Текущий чат удален из белого списка для слежения</b>",
+        "spywl": f"{rei} <b>Пользователь добавлен в белый список для слежения</b>",
+        "spywl_removed": f"{rei} <b>Пользователь удален из белого списка для слежения</b>",
         "spywl_clear": f"{rei} <b>Белый список для слежения очищен</b>",
-        "whitelist": f"\n{rei} <b>Слежу только за сообщениями от пользователей / групп:</b>\n{{}}",
-        "always_track": f"\n{rei} <b>Всегда слежу за сообщениями от пользователей / групп:</b>\n{{}}",
-        "blacklist": f"\n{rei} <b>Игнорирую сообщения от пользователей / групп:</b>\n{{}}",
-        "chat": f"{groups} <b>Слежу за сообщениями в группах</b>\n",
+        "whitelist": f"\n{rei} <b>Слежу только за сообщениями от пользователей:</b>\n{{}}",
+        "always_track": f"\n{rei} <b>Всегда слежу за сообщениями от пользователей:</b>\n{{}}",
+        "blacklist": f"\n{rei} <b>Игнорирую сообщения от пользователей:</b>\n{{}}",
         "pm": f"{pm} <b>Слежу за сообщениями в личных сообщениях</b>\n",
         "mode_off": f"{pm} <b>Не отслеживаю сообщения </b><code>{{}}spymode</code>\n",
         "deleted_pm": (
-            '🗑 <b><a href="{}">{}</a> удалил <a href="{message_url}">сообщение</a> в'
-            " личке. Содержимое:</b>\n{}"
-        ),
-        "deleted_chat": (
-            '🗑 <b><a href="{message_url}">Сообщение</a> в чате <a href="{}">{}</a> от'
-            ' <a href="{}">{}</a> было удалено. Содержимое:</b>\n{}'
+            '🗑 <b><a href="{}">{}</a> удалил сообщение в личке.</b>\n'
+            '<b>Содержимое:</b>\n{}'
         ),
         "edited_pm": (
-            '🔏 <b><a href="{}">{}</a> отредактировал <a'
-            ' href="{message_url}">сообщение</a> в личке. Старое содержимое:</b>\n{}'
-        ),
-        "edited_chat": (
-            '🔏 <b><a href="{message_url}">Сообщение</a> в чате <a href="{}">{}</a> от'
-            ' <a href="{}">{}</a> было отредактировано. Старое содержимое:</b>\n{}'
+            '🔏 <b><a href="{}">{}</a> отредактировал сообщение в личке.</b>\n'
+            '<b>Старое содержимое:</b>\n{}'
         ),
         "on": "включен",
         "off": "выключен",
-        "cfg_enable_pm": "Включить режим шпиона в личных сообщениях",
-        "cfg_enable_groups": "Включить режим шпиона в группах и супергруппах",
-        "cfg_whitelist": "Список чатов, от которых нужно сохранять сообщения",
-        "cfg_blacklist": "Список чатов, от которых нужно игнорировать сообщения",
+        "cfg_whitelist": "Список пользователей, от которых нужно сохранять сообщения",
+        "cfg_blacklist": "Список пользователей, от которых нужно игнорировать сообщения",
         "cfg_always_track": (
-            "Список чатов, от которых всегда следует отслеживать сообщения, "
-            "несмотря ни на что"
+            "Список пользователей, от которых всегда следует отслеживать сообщения"
         ),
         "cfg_log_edits": "Сохранять отредактированные сообщения",
         "cfg_ignore_inline": "Игнорировать сообщения из инлайн-режима",
         "cfg_fw_protect": "Защита от флудвейтов при пересылке (секунды)",
-        "no_channel_error": "❌ <b>Не удалось создать канал шпиона. Проверьте права бота.</b>",
     }
 
     def __init__(self):
         self._tl_channel = None
-        self._me = None
+        self._channel = None
         self.config = loader.ModuleConfig(
-            loader.ConfigValue(
-                "enable_pm",
-                True,
-                lambda: self.strings("cfg_enable_pm"),
-                validator=loader.validators.Boolean(),
-            ),
-            loader.ConfigValue(
-                "enable_groups",
-                False,
-                lambda: self.strings("cfg_enable_groups"),
-                validator=loader.validators.Boolean(),
-            ),
             loader.ConfigValue(
                 "whitelist",
                 [],
@@ -130,7 +101,7 @@ class NekoSpy(loader.Module):
             ),
             loader.ConfigValue(
                 "fw_protect",
-                3.0,
+                2.0,
                 lambda: self.strings("cfg_fw_protect"),
                 validator=loader.validators.Float(minimum=0.0),
             ),
@@ -161,7 +132,7 @@ class NekoSpy(loader.Module):
     @property
     def blacklist(self):
         """Получает черный список с системными ID"""
-        system_ids = [777000, self._client.tg_id, self._tl_channel]
+        system_ids = [777000, self._client.tg_id]
         if hasattr(self, 'inline') and hasattr(self.inline, 'bot_id'):
             system_ids.append(self.inline.bot_id)
         
@@ -170,7 +141,7 @@ class NekoSpy(loader.Module):
     @blacklist.setter
     def blacklist(self, value: list):
         """Устанавливает черный список, исключая системные ID"""
-        system_ids = {777000, self._client.tg_id, self._tl_channel}
+        system_ids = {777000, self._client.tg_id}
         if hasattr(self, 'inline') and hasattr(self.inline, 'bot_id'):
             system_ids.add(self.inline.bot_id)
         
@@ -193,12 +164,11 @@ class NekoSpy(loader.Module):
 
     async def client_ready(self):
         """Инициализация клиента и создание канала"""
-        self._me = await self._client.get_me()
         try:
             channel, _ = await utils.asset_channel(
                 self._client,
                 "heroku-nekospy",
-                "Удаленные и отредактированные сообщения появляются здесь",
+                "Удаленные и отредактированные сообщения из ЛС появляются здесь",
                 silent=True,
                 invite_bot=True,
                 avatar="https://pm1.narvii.com/6733/0e0380ca5cd7595de53f48c0ce541d3e2f2effc4v2_hq.jpg",
@@ -207,31 +177,38 @@ class NekoSpy(loader.Module):
             
             self._channel = int(f"-100{channel.id}")
             self._tl_channel = channel.id
+            logger.info(f"NekoSpy канал создан: {self._channel}")
         except Exception as e:
-            logger.error(f"Не удалось создать канал: {e}")
+            logger.error(f"Не удалось создать канал NekoSpy: {e}")
 
-    @loader.command(ru_doc="Переключить режим слежения")
+    @loader.command(ru_doc="Переключить режим слежения в ЛС")
     async def spymode(self, message: Message):
-        """Переключить режим слежения"""
+        """Переключить режим слежения в ЛС"""
+        new_state = not self.get("state", False)
+        self.set("state", new_state)
+        
         await utils.answer(
             message,
             self.strings("state").format(
-                self.strings("off" if self.get("state", False) else "on")
+                self.strings("on" if new_state else "off")
             ),
         )
-        self.set("state", not self.get("state", False))
 
-    @loader.command(ru_doc="Добавить / удалить чат из черного списка")
+    @loader.command(ru_doc="Добавить / удалить пользователя из черного списка")
     async def spybl(self, message: Message):
-        """Добавить / удалить чат из черного списка"""
-        chat = utils.get_chat_id(message)
+        """Добавить / удалить пользователя из черного списка"""
+        if not message.is_private:
+            await utils.answer(message, "❌ <b>Эта команда работает только в ЛС</b>")
+            return
+            
+        user_id = utils.get_chat_id(message)
         current_blacklist = self.config["blacklist"]
         
-        if chat in current_blacklist:
-            self.config["blacklist"] = [x for x in current_blacklist if x != chat]
+        if user_id in current_blacklist:
+            self.config["blacklist"] = [x for x in current_blacklist if x != user_id]
             await utils.answer(message, self.strings("spybl_removed"))
         else:
-            self.config["blacklist"] = current_blacklist + [chat]
+            self.config["blacklist"] = current_blacklist + [user_id]
             await utils.answer(message, self.strings("spybl"))
 
     @loader.command(ru_doc="Очистить черный список")
@@ -240,17 +217,21 @@ class NekoSpy(loader.Module):
         self.config["blacklist"] = []
         await utils.answer(message, self.strings("spybl_clear"))
 
-    @loader.command(ru_doc="Добавить / удалить чат из белого списка")
+    @loader.command(ru_doc="Добавить / удалить пользователя из белого списка")
     async def spywl(self, message: Message):
-        """Добавить / удалить чат из белого списка"""
-        chat = utils.get_chat_id(message)
+        """Добавить / удалить пользователя из белого списка"""
+        if not message.is_private:
+            await utils.answer(message, "❌ <b>Эта команда работает только в ЛС</b>")
+            return
+            
+        user_id = utils.get_chat_id(message)
         current_whitelist = self.config["whitelist"]
         
-        if chat in current_whitelist:
-            self.config["whitelist"] = [x for x in current_whitelist if x != chat]
+        if user_id in current_whitelist:
+            self.config["whitelist"] = [x for x in current_whitelist if x != user_id]
             await utils.answer(message, self.strings("spywl_removed"))
         else:
-            self.config["whitelist"] = current_whitelist + [chat]
+            self.config["whitelist"] = current_whitelist + [user_id]
             await utils.answer(message, self.strings("spywl"))
 
     @loader.command(ru_doc="Очистить белый список")
@@ -259,14 +240,18 @@ class NekoSpy(loader.Module):
         self.config["whitelist"] = []
         await utils.answer(message, self.strings("spywl_clear"))
 
+    def _get_pm_link(self, user_id: int) -> str:
+        """Создает ссылку для перехода в ЛС по ID пользователя"""
+        return f"tg://user?id={user_id}"
+
     async def _get_entities_list(self, entities: list) -> str:
-        """Получает отформатированный список сущностей"""
+        """Получает отформатированный список пользователей"""
         result = []
-        for entity_id in entities:
+        for user_id in entities:
             try:
-                entity = await self._client.get_entity(entity_id, exp=0)
-                url = utils.get_entity_url(entity)
-                name = get_display_name(entity)
+                user = await self._client.get_entity(user_id, exp=0)
+                url = self._get_pm_link(user_id)
+                name = get_display_name(user)
                 if hasattr(utils, 'escape_html'):
                     name = utils.escape_html(name)
                 result.append(
@@ -274,10 +259,10 @@ class NekoSpy(loader.Module):
                     f'<b><a href="{url}">{name}</a></b>'
                 )
             except Exception as e:
-                logger.warning(f"Не удалось получить информацию о сущности {entity_id}: {e}")
+                logger.warning(f"Не удалось получить информацию о пользователе {user_id}: {e}")
                 result.append(
                     f"\u0020\u2800\u0020\u2800<emoji document_id=4971987363145188045>▫️</emoji> "
-                    f"<b>ID: {entity_id}</b>"
+                    f"<b>ID: {user_id}</b>"
                 )
         return "\n".join(result)
 
@@ -290,13 +275,7 @@ class NekoSpy(loader.Module):
             )
             return
 
-        info = ""
-
-        if self.config["enable_groups"]:
-            info += self.strings("chat")
-
-        if self.config["enable_pm"]:
-            info += self.strings("pm")
+        info = self.strings("pm")
 
         if self.whitelist:
             info += self.strings("whitelist").format(
@@ -315,91 +294,15 @@ class NekoSpy(loader.Module):
 
         await utils.answer(message, info)
 
-    def _should_capture(self, user_id: int, chat_id: int) -> bool:
-        """Проверяет, нужно ли захватывать сообщение"""
+    def _should_capture(self, user_id: int) -> bool:
+        """Проверяет, нужно ли захватывать сообщение от пользователя"""
         return (
-            chat_id not in self.blacklist
-            and user_id not in self.blacklist
+            user_id not in self.blacklist
             and (
                 not self.whitelist
-                or chat_id in self.whitelist
                 or user_id in self.whitelist
             )
         )
-
-    async def _send_message_to_channel(self, content: str, media_message: Message = None):
-        """Отправляет сообщение в канал слежения"""
-        if not self._channel or not hasattr(self, 'inline'):
-            return
-            
-        try:
-            content = self.inline.sanitise_text(content)
-
-            if not media_message or not any([
-                media_message.photo, media_message.video, 
-                media_message.voice, media_message.document
-            ]):
-                self._queue.append(
-                    self.inline.bot.send_message(
-                        self._channel,
-                        content,
-                        disable_web_page_preview=True,
-                    )
-                )
-                return
-
-            if media_message.sticker:
-                self._queue.append(
-                    self.inline.bot.send_message(
-                        self._channel,
-                        content + "\n\n&lt;стикер&gt;",
-                        disable_web_page_preview=True,
-                    )
-                )
-                return
-
-            # Скачиваем и отправляем медиа
-            file_data = await self._client.download_media(media_message, bytes)
-            file = io.BytesIO(file_data)
-            
-            args = (self._channel, file)
-            kwargs = {"caption": content}
-            
-            if media_message.photo:
-                file.name = "photo.jpg"
-                self._queue.append(self.inline.bot.send_photo(*args, **kwargs))
-            elif media_message.video:
-                file.name = "video.mp4"
-                self._queue.append(self.inline.bot.send_video(*args, **kwargs))
-            elif media_message.voice:
-                file.name = "audio.ogg"
-                self._queue.append(self.inline.bot.send_voice(*args, **kwargs))
-            elif media_message.document:
-                file.name = "document"
-                # Получаем имя файла из атрибутов
-                for attr in getattr(media_message.document, 'attributes', []):
-                    if isinstance(attr, DocumentAttributeFilename):
-                        file.name = attr.file_name
-                        break
-                self._queue.append(self.inline.bot.send_document(*args, **kwargs))
-                
-        except Exception as e:
-            logger.error(f"Ошибка при отправке в канал: {e}")
-
-    def _get_message_key(self, message: Message) -> str:
-        """Получает ключ для кэширования сообщения"""
-        if message.is_private or isinstance(message.peer_id, PeerChat):
-            return str(message.id)
-        return f"{utils.get_chat_id(message)}/{message.id}"
-
-    def _get_message_url(self, message: Message) -> str:
-        """Получает URL сообщения"""
-        if hasattr(utils, 'get_message_link'):
-            return utils.get_message_link(message)
-        
-        if hasattr(message, 'chat') and message.chat:
-            return f"tg://c/{message.chat.id}/{message.id}"
-        return f"tg://c/{getattr(message.peer_id, 'chat_id', message.id)}/{message.id}"
 
     def _format_user_name(self, user) -> str:
         """Форматирует имя пользователя с экранированием HTML"""
@@ -408,91 +311,190 @@ class NekoSpy(loader.Module):
             return utils.escape_html(name)
         return name.replace('<', '&lt;').replace('>', '&gt;')
 
-    @loader.raw_handler(UpdateEditChannelMessage)
-    async def channel_edit_handler(self, update: UpdateEditChannelMessage):
-        """Обработчик редактирования сообщений в каналах"""
-        if (
-            not self.get("state", False)
-            or update.message.out
-            or (self.config["ignore_inline"] and update.message.via_bot_id)
-        ):
+    async def _send_to_channel(self, content: str, media_message: Message = None):
+        """Отправляет сообщение в канал слежения"""
+        if not self._channel or not hasattr(self, 'inline'):
+            logger.warning("Канал или inline бот недоступен")
             return
-
-        try:
-            key = f"{utils.get_chat_id(update.message)}/{update.message.id}"
-            cached_message = self._cache.get(key)
             
-            if not cached_message:
-                self._cache[key] = update.message
-                return
+        try:
+            content = self.inline.sanitise_text(content)
 
-            # Проверяем условия для логирования
-            should_log = (
-                utils.get_chat_id(update.message) in self.always_track
-                or cached_message.sender_id in self.always_track
-                or (
-                    self.config["log_edits"]
-                    and self.config["enable_groups"]
-                    and not isinstance(cached_message.peer_id, PeerUser)  # Все кроме ЛС
-                    and utils.get_chat_id(update.message) not in self.blacklist
-                    and (
-                        not self.whitelist
-                        or utils.get_chat_id(update.message) in self.whitelist
+            # Если нет медиа - отправляем текстом
+            if not media_message or not media_message.media:
+                
+                if media_message and media_message.sticker:
+                    content += "\n\n&lt;стикер&gt;"
+                    
+                self._queue.append(
+                    self.inline.bot.send_message(
+                        self._channel,
+                        content,
+                        parse_mode='HTML',
+                        disable_web_page_preview=True,
                     )
                 )
-            )
+                return
 
-            if (should_log and 
-                not getattr(cached_message.sender, 'bot', False) and 
-                hasattr(update.message, 'raw_text') and 
-                hasattr(cached_message, 'raw_text') and
-                update.message.raw_text != cached_message.raw_text):
+            # Скачиваем и отправляем медиа
+            try:
+                file_data = await self._client.download_media(media_message, bytes)
+                if not file_data:
+                    # Если не удалось скачать медиа, отправляем только текст
+                    content += "\n\n⚠️ <i>Медиа не удалось загрузить</i>"
+                    self._queue.append(
+                        self.inline.bot.send_message(
+                            self._channel,
+                            content,
+                            parse_mode='HTML',
+                            disable_web_page_preview=True,
+                        )
+                    )
+                    return
+
+                # Проверяем размер файла (Telegram bot API лимит ~50MB)
+                if len(file_data) > 45 * 1024 * 1024:  # 45MB для безопасности
+                    content += f"\n\n⚠️ <i>Файл слишком большой ({len(file_data)//1024//1024}MB)</i>"
+                    self._queue.append(
+                        self.inline.bot.send_message(
+                            self._channel,
+                            content,
+                            parse_mode='HTML',
+                            disable_web_page_preview=True,
+                        )
+                    )
+                    return
+                    
+                file = io.BytesIO(file_data)
+                file.seek(0)
                 
-                message_url = self._get_message_url(cached_message)
-                content = self.strings("edited_chat").format(
-                    utils.get_entity_url(cached_message.chat),
-                    self._format_user_name(cached_message.chat),
-                    utils.get_entity_url(cached_message.sender),
-                    self._format_user_name(cached_message.sender),
-                    cached_message.text or "<без текста>",
-                    message_url=message_url,
+                # Определяем тип медиа и отправляем
+                if media_message.photo:
+                    file.name = "photo.jpg"
+                    self._queue.append(
+                        self.inline.bot.send_photo(
+                            self._channel, 
+                            file, 
+                            caption=content, 
+                            parse_mode='HTML'
+                        )
+                    )
+                elif media_message.video:
+                    file.name = "video.mp4"
+                    self._queue.append(
+                        self.inline.bot.send_video(
+                            self._channel, 
+                            file, 
+                            caption=content, 
+                            parse_mode='HTML'
+                        )
+                    )
+                elif media_message.voice:
+                    file.name = "voice.ogg"
+                    self._queue.append(
+                        self.inline.bot.send_voice(
+                            self._channel, 
+                            file, 
+                            caption=content, 
+                            parse_mode='HTML'
+                        )
+                    )
+                elif media_message.audio:
+                    file.name = "audio.mp3"
+                    self._queue.append(
+                        self.inline.bot.send_audio(
+                            self._channel, 
+                            file, 
+                            caption=content, 
+                            parse_mode='HTML'
+                        )
+                    )
+                elif getattr(media_message, 'gif', False) or (
+                    media_message.document and 
+                    getattr(media_message.document, 'mime_type', '').startswith('video/') and
+                    'gif' in getattr(media_message.document, 'mime_type', '').lower()
+                ):
+                    file.name = "animation.gif"
+                    self._queue.append(
+                        self.inline.bot.send_animation(
+                            self._channel, 
+                            file, 
+                            caption=content, 
+                            parse_mode='HTML'
+                        )
+                    )
+                elif media_message.document:
+                    file.name = "document"
+                    # Получаем оригинальное имя файла
+                    for attr in getattr(media_message.document, 'attributes', []):
+                        if isinstance(attr, DocumentAttributeFilename):
+                            file.name = attr.file_name
+                            break
+                    
+                    self._queue.append(
+                        self.inline.bot.send_document(
+                            self._channel, 
+                            file, 
+                            caption=content, 
+                            parse_mode='HTML'
+                        )
+                    )
+                else:
+                    # Неопознанный тип медиа - отправляем как документ
+                    file.name = "media"
+                    self._queue.append(
+                        self.inline.bot.send_document(
+                            self._channel, 
+                            file, 
+                            caption=content, 
+                            parse_mode='HTML'
+                        )
+                    )
+                    
+            except Exception as media_error:
+                logger.error(f"Ошибка при работе с медиа: {media_error}")
+                # Отправляем без медиа
+                content += f"\n\n⚠️ <i>Ошибка загрузки медиа: {str(media_error)[:100]}...</i>"
+                self._queue.append(
+                    self.inline.bot.send_message(
+                        self._channel,
+                        content,
+                        parse_mode='HTML',
+                        disable_web_page_preview=True,
+                    )
                 )
                 
-                await self._send_message_to_channel(content, cached_message)
-
-            self._cache[key] = update.message
         except Exception as e:
-            logger.error(f"Ошибка в channel_edit_handler: {e}")
+            logger.error(f"Ошибка при отправке в канал: {e}")
 
     @loader.raw_handler(UpdateEditMessage)
-    async def pm_edit_handler(self, update: UpdateEditMessage):
+    async def edit_handler(self, update: UpdateEditMessage):
         """Обработчик редактирования сообщений в ЛС"""
         if (
             not self.get("state", False)
             or update.message.out
+            or not isinstance(update.message.peer_id, PeerUser)  # Только ЛС
             or (self.config["ignore_inline"] and update.message.via_bot_id)
         ):
             return
 
         try:
-            key = str(update.message.id)
-            cached_message = self._cache.get(key)
+            message_id = update.message.id
+            cached_message = self._cache.get(message_id)
             
             if not cached_message:
-                self._cache[key] = update.message
+                # Сохраняем новое сообщение в кэш
+                self._cache[message_id] = update.message
                 return
 
+            sender_id = cached_message.sender_id
+
             # Проверяем условия для логирования
-            is_pm = isinstance(cached_message.peer_id, PeerUser)
-            is_group = not is_pm  # Все что не ЛС = группы/супергруппы/каналы
-            
             should_log = (
-                cached_message.sender_id in self.always_track
-                or utils.get_chat_id(cached_message) in self.always_track
+                sender_id in self.always_track
                 or (
                     self.config["log_edits"]
-                    and self._should_capture(cached_message.sender_id, utils.get_chat_id(cached_message))
-                    and ((self.config["enable_pm"] and is_pm) or (self.config["enable_groups"] and is_group))
+                    and self._should_capture(sender_id)
                 )
             )
 
@@ -501,150 +503,91 @@ class NekoSpy(loader.Module):
                 hasattr(cached_message, 'raw_text') and
                 update.message.raw_text != cached_message.raw_text):
                 
-                sender = await self._client.get_entity(cached_message.sender_id, exp=0)
-                if getattr(sender, 'bot', False):
-                    return
+                try:
+                    sender = await self._client.get_entity(sender_id, exp=0)
+                    if getattr(sender, 'bot', False):
+                        return
 
-                message_url = self._get_message_url(cached_message)
-                
-                if is_group:
-                    try:
-                        chat = await self._client.get_entity(cached_message.peer_id.chat_id, exp=0)
-                    except:
-                        # Для супергрупп используем channel_id
-                        chat = await self._client.get_entity(getattr(cached_message.peer_id, 'channel_id', cached_message.peer_id.chat_id), exp=0)
-                    content = self.strings("edited_chat").format(
-                        utils.get_entity_url(chat),
-                        self._format_user_name(chat),
-                        utils.get_entity_url(sender),
-                        self._format_user_name(sender),
-                        cached_message.text or "<без текста>",
-                        message_url=message_url,
-                    )
-                else:
                     content = self.strings("edited_pm").format(
-                        utils.get_entity_url(sender),
+                        self._get_pm_link(sender_id),
                         self._format_user_name(sender),
                         cached_message.text or "<без текста>",
-                        message_url=message_url,
                     )
-                
-                await self._send_message_to_channel(content, cached_message)
+                    
+                    await self._send_to_channel(content, cached_message)
+                    
+                except Exception as entity_error:
+                    logger.error(f"Ошибка при получении данных отправителя: {entity_error}")
 
-            self._cache[key] = update.message
+            # Обновляем кэш
+            self._cache[message_id] = update.message
+            
         except Exception as e:
-            logger.error(f"Ошибка в pm_edit_handler: {e}")
+            logger.error(f"Ошибка в edit_handler: {e}")
 
     @loader.raw_handler(UpdateDeleteMessages)
-    async def pm_delete_handler(self, update: UpdateDeleteMessages):
+    async def delete_handler(self, update: UpdateDeleteMessages):
         """Обработчик удаления сообщений в ЛС"""
         if not self.get("state", False):
             return
 
         try:
             for message_id in update.messages:
-                cached_message = self._cache.pop(str(message_id), None)
+                cached_message = self._cache.pop(message_id, None)
                 if not cached_message:
                     continue
 
+                # Проверяем, что это ЛС
+                if not isinstance(cached_message.peer_id, PeerUser):
+                    continue
+
+                sender_id = cached_message.sender_id
+
                 # Проверяем условия для логирования
-                is_pm = isinstance(cached_message.peer_id, PeerUser)
-                is_group = not is_pm  # Все что не ЛС = группы/супергруппы/каналы
-                
                 should_log = (
-                    cached_message.sender_id in self.always_track
-                    or utils.get_chat_id(cached_message) in self.always_track
+                    sender_id in self.always_track
                     or (
-                        self._should_capture(cached_message.sender_id, utils.get_chat_id(cached_message))
+                        self._should_capture(sender_id)
                         and not (self.config["ignore_inline"] and cached_message.via_bot_id)
-                        and ((self.config["enable_pm"] and is_pm) or 
-                             (self.config["enable_groups"] and is_group))
                     )
                 )
 
                 if not should_log:
                     continue
 
-                sender = await self._client.get_entity(cached_message.sender_id, exp=0)
-                if getattr(sender, 'bot', False):
-                    continue
+                try:
+                    sender = await self._client.get_entity(sender_id, exp=0)
+                    if getattr(sender, 'bot', False):
+                        continue
 
-                message_url = self._get_message_url(cached_message)
-                
-                if is_group:
-                    try:
-                        chat = await self._client.get_entity(cached_message.peer_id.chat_id, exp=0)
-                    except:
-                        # Для супергрупп используем channel_id
-                        chat = await self._client.get_entity(getattr(cached_message.peer_id, 'channel_id', cached_message.peer_id.chat_id), exp=0)
-                    content = self.strings("deleted_chat").format(
-                        utils.get_entity_url(chat),
-                        self._format_user_name(chat),
-                        utils.get_entity_url(sender),
-                        self._format_user_name(sender),
-                        cached_message.text or "<без текста>",
-                        message_url=message_url,
-                    )
-                else:
                     content = self.strings("deleted_pm").format(
-                        utils.get_entity_url(sender),
+                        self._get_pm_link(sender_id),
                         self._format_user_name(sender),
                         cached_message.text or "<без текста>",
-                        message_url=message_url,
-                    )
-                
-                await self._send_message_to_channel(content, cached_message)
-                
-        except Exception as e:
-            logger.error(f"Ошибка в pm_delete_handler: {e}")
-
-    @loader.raw_handler(UpdateDeleteChannelMessages)
-    async def channel_delete_handler(self, update: UpdateDeleteChannelMessages):
-        """Обработчик удаления сообщений в каналах"""
-        if not self.get("state", False):
-            return
-
-        try:
-            for message_id in update.messages:
-                key = f"{update.channel_id}/{message_id}"
-                cached_message = self._cache.pop(key, None)
-                if not cached_message:
-                    continue
-
-                should_log = (
-                    cached_message.sender_id in self.always_track
-                    or utils.get_chat_id(cached_message) in self.always_track
-                    or (
-                        self.config["enable_groups"]
-                        and not isinstance(cached_message.peer_id, PeerUser)  # Все кроме ЛС
-                        and self._should_capture(cached_message.sender_id, utils.get_chat_id(cached_message))
-                        and not (self.config["ignore_inline"] and cached_message.via_bot_id)
-                        and not getattr(cached_message.sender, 'bot', False)
-                    )
-                )
-
-                if should_log:
-                    message_url = self._get_message_url(cached_message)
-                    content = self.strings("deleted_chat").format(
-                        utils.get_entity_url(cached_message.chat),
-                        self._format_user_name(cached_message.chat),
-                        utils.get_entity_url(cached_message.sender),
-                        self._format_user_name(cached_message.sender),
-                        cached_message.text or "<без текста>",
-                        message_url=message_url,
                     )
                     
-                    await self._send_message_to_channel(content, cached_message)
+                    await self._send_to_channel(content, cached_message)
+                    
+                except Exception as entity_error:
+                    logger.error(f"Ошибка при получении данных отправителя: {entity_error}")
                     
         except Exception as e:
-            logger.error(f"Ошибка в channel_delete_handler: {e}")
+            logger.error(f"Ошибка в delete_handler: {e}")
 
     @loader.watcher("in")
     async def watcher(self, message: Message):
-        """Кэширует входящие сообщения для отслеживания"""
+        """Кэширует входящие сообщения из ЛС для отслеживания"""
         try:
-            with contextlib.suppress(AttributeError):
-                key = self._get_message_key(message)
-                self._cache[key] = message
+            # Кэшируем только сообщения из ЛС
+            if message.is_private and not message.out:
+                self._cache[message.id] = message
+                
+                # Ограничиваем размер кэша
+                if len(self._cache) > 10000:
+                    # Удаляем старые записи (первые 1000)
+                    old_keys = list(self._cache.keys())[:1000]
+                    for key in old_keys:
+                        self._cache.pop(key, None)
+                        
         except Exception as e:
             logger.error(f"Ошибка в watcher: {e}")
