@@ -19,7 +19,7 @@ class CheckerTGMod(loader.Module):
         "checking": "<emoji document_id=5348282577662778261>🔍</emoji> <b>[CheckerAPI]</b> Выполняю проверку...",
         "getting_id": "<emoji document_id=5348282577662778261>🔍</emoji> <b>[CheckerAPI]</b> Определяю ID пользователя...",
         "response": (
-            "<emoji document_id=5776375003280838798>✅</emoji> <b>[CheckerAPI]</b> <u>Результат проверки</u>\n\n"
+            "<emoji document_id=5776375003280838798>✅</emoji> <b>[CheckerAPI]</b> Результат проверки\n\n"
             "<emoji document_id=5879770735999717115>👤</emoji> <b>ID:</b> <code>{user_id}</code>\n"
             "<emoji document_id=5897488197650223178>📞</emoji> <b>Номер телефона:</b> <code>{phone_number}</code>\n"
             "<emoji document_id=5960751816084820359>⏲️</emoji> <b>Время выполнения:</b> <code>{time} ms</code>\n"
