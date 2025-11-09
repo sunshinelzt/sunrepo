@@ -67,7 +67,7 @@ class CheckerTGMod(loader.Module):
 
     @loader.owner
     async def checkcmd(self, m):
-        """.check <user_id/@username/reply> - проверка пользователя на слитый номер"""
+        """<user_id/@username/reply> - проверка пользователя на слитый номер"""
         reply = await m.get_reply_message()
         user_input = utils.get_args_raw(m) or (reply.sender_id if reply else None)
 
