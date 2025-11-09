@@ -22,7 +22,7 @@ class CheckerTGMod(loader.Module):
             "<emoji document_id=5776375003280838798>✅</emoji> <b>[CheckerAPI]</b> <u>Результат проверки</u>\n\n"
             "<emoji document_id=5879770735999717115>👤</emoji> <b>ID:</b> <code>{user_id}</code>\n"
             "<emoji document_id=5897488197650223178>📞</emoji> <b>Номер телефона:</b> <code>{phone_number}</code>\n"
-            "<emoji document_id=5960751816084820359>⏲️</emoji> <b>Время выполнения:</b> <code>{time}</code> ms\n"
+            "<emoji document_id=5960751816084820359>⏲️</emoji> <b>Время выполнения:</b> <code>{time} ms</code>\n"
         ),
         "no_user": "<emoji document_id=5775887550262546277>❗️</emoji> <b>[CheckerAPI]</b> Укажите ID, username или ответьте на сообщение.",
         "error": "<emoji document_id=5778527486270770928>❌</emoji> <b>[CheckerAPI]</b> Ошибка запроса: <code>{}</code>",
