@@ -8,7 +8,6 @@ __version__ = (1, 0, 0, 0)
 
 from .. import loader, utils
 import aiohttp
-from typing import Optional, Tuple
 
 @loader.tds
 class CheckerTGMod(loader.Module):
@@ -20,8 +19,7 @@ class CheckerTGMod(loader.Module):
         "getting_id": "<emoji document_id=5348282577662778261>🔍</emoji> <b>[CheckerAPI]</b> Определяю ID пользователя...",
         "response": (
             "<emoji document_id=5776375003280838798>✅</emoji> <b>[CheckerAPI]</b> Результат проверки\n\n"
-            "<emoji document_id=5879770735999717115>👤</emoji> <b>Имя:</b> <code>{full_name}</code>\n"
-            "<emoji document_id=5879770735999717115>🆔</emoji> <b>ID:</b> <code>{user_id}</code>\n"
+            "<emoji document_id=5879770735999717115>👤</emoji> <b>ID:</b> <code>{user_id}</code>\n"
             "<emoji document_id=5897488197650223178>📞</emoji> <b>Номер телефона:</b> <code>{phone_number}</code>\n"
             "<emoji document_id=5960751816084820359>⏲️</emoji> <b>Время выполнения:</b> <code>{time} ms</code>\n"
         ),
@@ -32,32 +30,22 @@ class CheckerTGMod(loader.Module):
     }
 
     API_URL = "https://api.d4n13l3k00.ru/tg/leaked/check"
-    REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
-    async def get_user_info(self, identifier: str, client) -> Tuple[Optional[int], Optional[str], Optional[str]]:
-        """Получает user ID, username и полное имя по идентификатору через Telegram API"""
+    async def get_user_id(self, username: str, client):
+        """Получает user ID по идентификатору через Telegram API"""
         try:
-            entity = await client.get_entity(identifier)
-            full_name = ""
-            
-            if hasattr(entity, 'first_name'):
-                full_name = entity.first_name or ""
-                if hasattr(entity, 'last_name') and entity.last_name:
-                    full_name += f" {entity.last_name}"
-            
-            return entity.id, getattr(entity, 'username', None), full_name.strip()
+            entity = await client.get_entity(username)
+            return entity.id
         except Exception:
-            return None, None, None
+            return None
 
-    def parse_phone_number(self, data: dict) -> str:
+    @staticmethod
+    def parse_phone_number(data: dict) -> str:
         """Парсит номер телефона из ответа API"""
         raw_data = data.get("data", "")
         
-        if "Not found" in raw_data:
+        if "Not found" in raw_data or "UID must be int!" in raw_data:
             return "Не найден!"
-        
-        if "UID must be int!" in raw_data:
-            return "UID должен быть целым числом!"
         
         if " | " in raw_data:
             phone = raw_data.split(" | ")[0].replace("Phone: ", "").strip()
@@ -67,10 +55,10 @@ class CheckerTGMod(loader.Module):
 
     async def fetch_user_data(self, user_id: str) -> dict:
         """Выполняет запрос к API для получения данных пользователя"""
-        async with aiohttp.ClientSession(timeout=self.REQUEST_TIMEOUT) as session:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(f"{self.API_URL}?uid={user_id}") as resp:
-                if resp.status != 200:
-                    raise ValueError(f"HTTP {resp.status}")
+                resp.raise_for_status()
                 return await resp.json()
 
     @loader.owner
@@ -82,24 +70,17 @@ class CheckerTGMod(loader.Module):
         if not user_input:
             return await m.edit(self.strings["no_user"])
 
-        full_name = "Неизвестно"
-        
         if isinstance(user_input, str) and user_input.startswith("@"):
             await m.edit(self.strings["getting_id"])
-            user_id, _, full_name = await self.get_user_info(user_input, m.client)
+            user_id = await self.get_user_id(user_input, m.client)
             
             if not user_id:
                 return await m.edit(self.strings["user_not_found"].format(user_input))
-        elif reply:
-            user_id = str(user_input).strip()
-            _, _, full_name = await self.get_user_info(user_id, m.client)
         else:
             user_id = str(user_input).strip()
             
             if not user_id.isdigit():
                 return await m.edit(self.strings["invalid_uid"])
-            
-            _, _, full_name = await self.get_user_info(int(user_id), m.client)
 
         await m.edit(self.strings["checking"])
 
@@ -107,18 +88,13 @@ class CheckerTGMod(loader.Module):
             data = await self.fetch_user_data(user_id)
             phone_number = self.parse_phone_number(data)
             
-            result_message = self.strings["response"].format(
-                full_name=full_name or "Неизвестно",
+            await m.edit(self.strings["response"].format(
                 user_id=user_id,
                 phone_number=phone_number,
                 time=round(data.get("time", 0), 3)
-            )
-            
-            await m.edit(result_message)
+            ))
 
         except aiohttp.ClientError as e:
             await m.edit(self.strings["error"].format(f"Ошибка сети: {type(e).__name__}"))
-        except ValueError as e:
-            await m.edit(self.strings["error"].format(str(e)))
         except Exception as e:
-            await m.edit(self.strings["error"].format(f"Неизвестная ошибка: {type(e).__name__}"))
+            await m.edit(self.strings["error"].format(f"Ошибка: {type(e).__name__}"))
