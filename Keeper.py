@@ -273,9 +273,6 @@ class KeeperMod(loader.Module):
         
         if utils.get_chat_id(message) == self._me.id or message.is_private:
             temp_msg = await utils.answer(message, status_msg)
-            await asyncio.sleep(2)
-            try:
-                await temp_msg.delete()
             except:
                 pass
 
