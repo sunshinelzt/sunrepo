@@ -273,8 +273,6 @@ class KeeperMod(loader.Module):
         
         if utils.get_chat_id(message) == self._me.id or message.is_private:
             temp_msg = await utils.answer(message, status_msg)
-            except:
-                pass
 
     async def watcher(self, message):
         """Смотрим за всеми сообщениями как ебаные шпионы"""
