@@ -11,7 +11,7 @@ RESPONSE_TIMEOUT = 10
 
 
 @loader.tds
-class Photo(loader.Module):
+class LoliHentai(loader.Module):
     """Лучший источник лолек"""
 
     strings = {
