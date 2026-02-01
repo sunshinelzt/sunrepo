@@ -1,4 +1,4 @@
-# meta dev: @sunshinelzt
+# meta developer: @sunshinelzt
 
 import logging
 import asyncio
